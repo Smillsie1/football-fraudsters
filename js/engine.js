@@ -6,7 +6,7 @@
 //   FFP loss       = owner equity (the only spend not covered by booked revenue)
 // So to spend big without breaching FFP you must make owner money look like revenue,
 // and fair market value only rises as the club genuinely gets bigger (brand).
-import { DIVISIONS, CLUBS, METHODS, LAWYERS, EVENTS, SEASONS, FUND, MONEY_LEAGUE, RIVAL_GROWTH, BREACH_VECTORS, RESPONSES, OBSTRUCTIONS, EBT, AMORTISATION, HMRC } from './data.js';
+import { DIVISIONS, CLUBS, METHODS, LAWYERS, EVENTS, SEASONS, FUND, MONEY_LEAGUE, RIVAL_GROWTH, BREACH_VECTORS, RESPONSES, OBSTRUCTIONS, EBT, AMORTISATION, HMRC, REFEREES } from './data.js';
 
 export const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
 export const divisionByTier = (tier) => DIVISIONS.find((d) => d.tier === tier);
@@ -54,6 +54,9 @@ export function newGame({ owner, title, state, holdco, divisionId, clubIndex }) 
     amortiseUsed: false,
     embargo: 0,       // seasons of transfer embargo remaining (from banned methods)
     tpoUsed: false,
+    refInfluence: 0,  // referee influence, 0-100 (decays each season)
+    refUsed: false,
+    matchFixingScandal: false,
     liquidated: false,
     suspicion: 0,
     season: 1,
@@ -183,6 +186,7 @@ export function previewSeason(game, alloc) {
   }
   const secSpend = Math.max(0, alloc.security || 0);
   const ebtSpend = Math.max(0, alloc.ebt || 0); // wages routed through the trust
+  const refSpend = Math.max(0, alloc.ref || 0); // "unconnected" referee hospitality
   const amortise = !!alloc.amortise;
   const booked = genuine + related + oneoff;
   // EBT and off-book money both buy squad strength without touching the FFP books.
@@ -210,6 +214,8 @@ export function previewSeason(game, alloc) {
     exposure: exposure(game, { related, oneoff, offbook, genuine }),
     taxAccrued, projectedTaxExposure: projTaxExposure,
     hmrcChance: hmrcChance(projTaxExposure, genuine),
+    refSpend, projectedInfluence: projectedInfluence(game, refSpend),
+    matchFixingRisk: matchFixingRisk(projectedInfluence(game, refSpend)),
     addedSuspicion: susp,
     projectedSuspicion: projSusp,
     investigationChance: investigationChance(projSusp),
@@ -229,6 +235,18 @@ export function hmrcChance(taxExposure, genuine) {
 }
 export const hmrcBill = (taxExposure) => taxExposure * HMRC.billMultiplier;
 export const wouldLiquidate = (taxExposure, genuine) => hmrcBill(taxExposure) > genuine * HMRC.liquidationRatio;
+
+// --- nobble the officials --------------------------------------------------
+export const refMax = (div) => div.scale * 8;
+export function projectedInfluence(game, refSpend) {
+  const div = divisionByTier(game.tier);
+  const gain = 45 * (1 - Math.exp(-Math.max(0, refSpend || 0) / (div.scale * 3)));
+  return clamp(game.refInfluence * REFEREES.decay + gain, 0, REFEREES.maxInfluence);
+}
+// Favourable decisions worth up to ~3 league places at full influence.
+export const refPlaceBonus = (influence) => Math.round(influence / 32);
+// Match-fixing is the gravest charge: a small but real chance of a Calciopoli.
+export const matchFixingRisk = (influence) => influence <= 0 ? 0 : clamp(influence / 350, 0, 0.3);
 
 function finishPosition(strength, div, rng) {
   const n = div.teams;
@@ -278,6 +296,7 @@ export function playSeason(prev, alloc, rng = Math.random) {
     movement: null, newCase: null, verdicts: [], pointsDeducted: 0,
     exposure: p.exposure, breach: null, newHmrc: null, hmrcVerdicts: [],
     taxExposure: p.projectedTaxExposure, deferredLoss: game.deferredLoss + p.deferredNow,
+    refInfluence: p.projectedInfluence, integrityScandal: false,
   };
 
   if ((alloc.stadium || 0) > 0 && !game.stadiumSold) game.stadiumSold = true;
@@ -288,8 +307,14 @@ export function playSeason(prev, alloc, rng = Math.random) {
   game.strength = p.projectedStrength;
   game.suspicion = p.projectedSuspicion;
   game.taxExposure = p.projectedTaxExposure;
+  game.fundSpent += p.refSpend; // hospitality, paid by an "unconnected" company
+  game.refInfluence = p.projectedInfluence;
+  if (p.refSpend > 0) game.refUsed = true;
   if (p.amortise) { game.deferredLoss += p.deferredNow; game.amortiseUsed = true; }
   if ((alloc.tpo || 0) > 0) game.tpoUsed = true;
+
+  // Bought referees leave a trail: a standing integrity risk the regulator can smell.
+  if (game.refInfluence > 0) game.suspicion = clamp(game.suspicion + Math.round(game.refInfluence / 16), 0, 100);
 
   // A transfer embargo (from banned methods) saps squad strength while it lasts.
   if (game.embargo > 0) {
@@ -384,7 +409,26 @@ export function playSeason(prev, alloc, rng = Math.random) {
     if (!v.guilty) game.suspicion = clamp(game.suspicion - 30, 0, 100);
   }
 
+  // Match-fixing is the gravest charge. When it lands, it's Calciopoli: titles
+  // stripped and relegation, no lawyers, no appeal that helps.
+  if (game.refInfluence > 0 && rng() < matchFixingRisk(game.refInfluence)) {
+    game.matchFixingScandal = true;
+    report.integrityScandal = true;
+    report.forcedRelegation = true;
+    const stripped = game.trophies > 0;
+    if (stripped) game.trophies -= 1;
+    game.suspicion = clamp(game.suspicion + 25, 0, 100);
+    game.refInfluence = 0;
+    game.penalties.push(`Match-fixing proven: ${stripped ? 'a title stripped and ' : ''}expelled a division (Calciopoli-style)`);
+    report.news.push(`INTEGRITY SCANDAL: an inquiry proves the referee "seminars" were anything but unconnected. ${stripped ? 'A title is stripped and the ' : 'The '}club is expelled a division. This is what happened to Juventus in 2006.`);
+  }
+
   let pos = finishPosition(game.strength, div, rng);
+  // Favourable decisions from nobbled referees nudge you up the table.
+  pos = clamp(pos - refPlaceBonus(game.refInfluence), 1, div.teams);
+  if (game.refInfluence > 25 && !report.integrityScandal && rng() < 0.4) {
+    report.events.push('A 96th-minute penalty the replays can’t justify sinks your nearest rivals. The referee looks very tanned.');
+  }
   pos = clamp(pos + Math.round(report.pointsDeducted / 3), 1, div.teams);
   report.position = pos;
 
@@ -549,6 +593,7 @@ export function finalScore(game) {
   score += (game.startTier - game.tier) * 50 - game.penalties.length * 60;
   if (game.tier === 1) score += 200;
   if (game.liquidated) score -= 300;
+  if (game.matchFixingScandal) score -= 250;
   if (last) score += Math.max(0, MONEY_LEAGUE.length + 2 - last.moneyRank) * 60;
   return Math.round(score);
 }
@@ -558,6 +603,7 @@ export function endingTitle(game) {
   const pending = game.cases.filter((c) => !c.resolved);
   const taxPending = game.hmrcCases.filter((c) => !c.resolved);
   if (game.liquidated) return { title: 'Done a Rangers', blurb: 'The taxman got his money the only way left: by liquidating the club. You are starting again several divisions down. The trophies, awkwardly, stay in the cabinet.' };
+  if (game.matchFixingScandal) return { title: 'Calciopoli', blurb: 'The referee "seminars" were anything but unconnected. A title stripped, an expulsion, and an asterisk next to everything you ever won. The one line even football won’t let you cross.' };
   if (taxPending.length) return { title: 'The Taxman Cometh', blurb: `You beat football’s regulators, but HMRC’s case lands in season ${taxPending[0].dueSeason}, and the courts rarely side with a "loan" nobody repaid.` };
   if (game.penalties.some((p) => p.startsWith('Expelled'))) return { title: 'Caught Red-Handed', blurb: 'The regulator actually did it. Somewhere, a pundit is still saying "they earned it".' };
   if (last?.moneyRank === 1 && pending.length) return { title: 'Richest Club on Earth (Allegedly)', blurb: `You out-earned Real Madreeed. The verdict on how is due in season ${pending[0].verdictSeason}. Until then you are, technically, a commercial genius.` };

@@ -243,6 +243,18 @@ export const AMORTISATION = {
   precedent: 'Chelsea handed out seven- and eight-year contracts in 2023 to spread transfer fees under FFP. UEFA responded by capping the accounting period at five years.',
 };
 
+// Nobble the officials. Fly referees out to your homeland for lavish, entirely
+// "unconnected" hospitality; they then favour your team on the close calls.
+// Builds hidden influence that nudges results your way -- but match-fixing is
+// the gravest charge in the game, and it can strip titles and relegate you.
+export const REFEREES = {
+  id: 'ref', name: 'Fly referees out for "warm-weather seminars"', emoji: '\u{1F6A9}',
+  decay: 0.75, maxInfluence: 100,
+  theory: 'Invite match officials to your home country for an all-expenses "coaching conference" at a seven-star resort. Nothing is asked for in return — the two things are completely unconnected. Later, when one of them officiates your league, the 50/50s, the soft penalties and the marginal offsides all seem to go your way. A rival’s title challenge dies on a 94th-minute decision the replays can’t justify.',
+  redFlags: 'Integrity units, betting-pattern analysis, and referees’ own travel and hospitality records. The link you tried to hide is exactly what investigators look for.',
+  precedent: 'Italy’s 2006 "Calciopoli" scandal centred on clubs influencing the appointment of favourable referees: Juventus were stripped of two league titles and relegated to Serie B, and other clubs were penalised. In Germany in 2005, referee Robert Hoyzer was convicted over fixed matches.',
+};
+
 // The taxman: a second enforcer, separate from football's regulators.
 export const HMRC = {
   name: 'HM Revenue & Customs',

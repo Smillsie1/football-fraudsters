@@ -207,3 +207,6 @@ table.money tr.you { background: color-mix(in srgb, var(--gold) 22%, transparent
 
 /* --- taxman / EBT / amortisation side missions --- */
 .method.ebt { border-left: 4px solid #8a63d2; }
+
+/* --- referee influence side mission --- */
+.method.ref { border-left: 4px solid var(--bad); }

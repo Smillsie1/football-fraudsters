@@ -1,10 +1,10 @@
 // UI layer. Security rule: never use innerHTML. All text goes through textContent via h().
-import { DIVISIONS, CLUBS, METHODS, LAWYERS, RESPONSES, BREACH_VECTORS, OBSTRUCTIONS, EBT, AMORTISATION, HMRC, STATES, TITLES, RULES_EXPLAINER, BLUEPRINT, SEASONS, FUND } from './data.js';
+import { DIVISIONS, CLUBS, METHODS, LAWYERS, RESPONSES, BREACH_VECTORS, OBSTRUCTIONS, EBT, AMORTISATION, HMRC, REFEREES, STATES, TITLES, RULES_EXPLAINER, BLUEPRINT, SEASONS, FUND } from './data.js';
 import {
   newGame, previewSeason, playSeason, hireLawyers, resolveBreach, resolveHmrc, formatMoney, methodMax, methodCap,
   rattleRating, divisionByTier, finalScore, endingTitle, genuineRevenue, defaultAlloc,
   moneyLeague, fundShare, lastReport, securityMax, vectorById, responseById,
-  applyObstruction, previewObstruction,
+  applyObstruction, previewObstruction, refMax,
 } from './engine.js';
 
 const app = document.getElementById('app');
@@ -173,6 +173,7 @@ function statusBar(season = game.season) {
     openCase ? h('p', { class: 'case-flag' }, `⚖️ ${openCase.charges} charges pending. Verdict due season ${openCase.verdictSeason}.`) : null,
     taxCase ? h('p', { class: 'case-flag' }, `\u{1F3DB}️ HMRC case: ${formatMoney(taxCase.bill)} bill, verdict due season ${taxCase.dueSeason}.`) : null,
     (game.taxExposure > 0 && !taxCase) ? h('p', { class: 'muted small' }, `\u{1F3DB}️ Unpaid tax exposure: ${formatMoney(game.taxExposure)}.`) : null,
+    game.refInfluence > 0 ? h('p', { class: 'muted small' }, `\u{1F6A9} Referee influence: ${Math.round(game.refInfluence)}/100.`) : null,
     game.embargo > 0 ? h('p', { class: 'case-flag' }, `\u{1F6AB} Transfer embargo: ${game.embargo} season(s) left.`) : null);
 }
 
@@ -194,7 +195,7 @@ function screenSeason() {
     const lossLine = Number.isFinite(p.rollingLimit)
       ? `FFP: owner losses over 3 seasons ${formatMoney(p.rollingLoss)} of ${formatMoney(p.rollingLimit)} allowed`
       : 'FFP: no meaningful loss limit at this level';
-    preview.replaceChildren(
+    preview.replaceChildren(...[
       h('h3', {}, 'The accounts (as presented)'),
       h('dl', { class: 'ledger' },
         h('dt', {}, 'Genuine revenue'), h('dd', {}, formatMoney(p.genuine)),
@@ -209,9 +210,11 @@ function screenSeason() {
       h('p', { class: p.investigationChance > 0.35 ? 'warn' : '' }, `Chance of being rattled by the ${div.regulator} this season: `, h('strong', {}, pct(p.investigationChance))),
       h('p', { class: p.breachChance > 0.2 ? 'warn' : 'muted small' }, `Chance of a cyber incident this season: `, h('strong', {}, pct(p.breachChance)), `. If data leaks, ${pct(p.exposure)} of your operation is fake and would be exposed.`),
       p.projectedTaxExposure > 0 ? h('p', { class: p.hmrcChance > 0.2 ? 'warn' : 'muted small' }, `Unpaid tax building up: `, h('strong', {}, formatMoney(p.projectedTaxExposure)), `. Chance the taxman opens a case: `, h('strong', {}, pct(p.hmrcChance)), '.') : null,
+      p.projectedInfluence > 0 ? h('p', { class: p.matchFixingRisk > 0.12 ? 'warn' : 'muted small' }, `Referee influence: `, h('strong', {}, Math.round(p.projectedInfluence)), `/100 (worth up to a few league places). Chance of a match-fixing scandal: `, h('strong', {}, pct(p.matchFixingRisk)), '.') : null,
       p.deferredNow > 0 ? h('p', { class: 'muted small' }, `Deferring ${formatMoney(p.deferredNow)} of this season’s loss via amortisation (total deferred: ${formatMoney(game.deferredLoss + p.deferredNow)}).`) : null,
       h('p', { class: p.breachesLossLimit ? 'warn' : 'muted small' }, lossLine, p.breachesLossLimit ? '. BREACH: automatic points deduction!' : ''),
-      p.overCap.length ? h('p', { class: 'warn small' }, `Above fair market value: ${p.overCap.map((id) => METHODS.find((m) => m.id === id).name).join(', ')}`) : null);
+      p.overCap.length ? h('p', { class: 'warn small' }, `Above fair market value: ${p.overCap.map((id) => METHODS.find((m) => m.id === id).name).join(', ')}`) : null,
+    ].filter(Boolean));
   };
 
   const card = (m) => {
@@ -298,6 +301,27 @@ function screenSeason() {
         h('p', { class: 'small' }, `\u{1F4A1} ${AMORTISATION.precedent}`)));
   };
 
+  const refereeCard = () => {
+    const max = refMax(div);
+    const out = h('output', { class: 'amount' }, formatMoney(alloc.ref || 0));
+    const slider = h('input', {
+      type: 'range', min: '0', max: String(max), step: String(max / 200), value: String(alloc.ref || 0),
+      'aria-label': 'Referee hospitality spend',
+      oninput: (e) => { alloc.ref = Math.min(max, Math.max(0, Number(e.target.value) || 0)); out.textContent = formatMoney(alloc.ref); updatePreview(); },
+    });
+    return h('section', { class: 'group' },
+      h('h3', {}, '\u{1F6A9} Nobble the officials'),
+      h('p', { class: 'muted small' }, 'Invisible to the accounts — and to football, until an integrity unit joins the dots. This is the line even the other cheats don’t cross.'),
+      h('details', { class: 'method card ref' },
+        h('summary', {}, h('span', { class: 'emoji', 'aria-hidden': 'true' }, REFEREES.emoji), h('span', { class: 'm-name' }, REFEREES.name), h('span', { class: 'badge risk-4' }, 'Match-fixing')),
+        h('div', { class: 'slider-row' }, slider, out),
+        h('p', { class: 'muted small' }, `Current influence: ${Math.round(game.refInfluence)}/100. Favourable 50/50s, soft penalties and marginal offsides nudge your results — but if it’s ever proven, it strips titles and relegates you.`),
+        h('dl', {},
+          h('dt', {}, 'How it works in theory'), h('dd', {}, REFEREES.theory),
+          h('dt', {}, 'What catches it'), h('dd', {}, REFEREES.redFlags),
+          h('dt', {}, 'Real-world precedent'), h('dd', {}, REFEREES.precedent))));
+  };
+
   updatePreview();
   render(
     statusBar(),
@@ -307,7 +331,7 @@ function screenSeason() {
       h('div', { class: 'methods' }, GROUPS.map((g) => h('section', { class: 'group' },
         h('h3', {}, g.title),
         h('p', { class: 'muted small' }, g.note),
-        METHODS.filter((m) => m.kind === g.kind).map(card))).concat(taxmanCard(), securityCard())),
+        METHODS.filter((m) => m.kind === g.kind).map(card))).concat(taxmanCard(), refereeCard(), securityCard())),
       h('aside', {}, preview,
         h('button', { class: 'primary big full', onclick: () => {
           const res = playSeason(game, alloc);
@@ -540,6 +564,7 @@ function screenEnd() {
       h('dt', {}, 'Obstruction'), h('dd', {}, game.obstructionUsed ? `Deployed (cover level ${Math.round(game.coverLevel)}/100)` : 'None — a model of transparency'),
       h('dt', {}, 'Tax bills paid'), h('dd', {}, game.taxBillsPaid > 0 ? formatMoney(game.taxBillsPaid) : (game.taxExposure > 0 ? `None yet (${formatMoney(game.taxExposure)} still owed)` : 'None')),
       game.liquidated ? h('dt', {}, 'Liquidated') : null, game.liquidated ? h('dd', {}, 'Yes — the club died and was reborn in a lower division') : null,
+      game.refUsed ? h('dt', {}, 'Referee "hospitality"') : null, game.refUsed ? h('dd', {}, game.matchFixingScandal ? 'Caught: match-fixing proven' : 'Never proven (influence left: ' + Math.round(game.refInfluence) + '/100)') : null,
       h('dt', {}, 'Trophies'), h('dd', {}, String(game.trophies)),
       h('dt', {}, 'Promotions / relegations'), h('dd', {}, `${game.promotions} / ${game.relegations}`),
       h('dt', {}, 'Penalties'), h('dd', {}, game.penalties.length ? h('ul', { class: 'penalties' }, game.penalties.map((x) => h('li', {}, x))) : 'None. Remarkable.'),
@@ -599,7 +624,12 @@ function buildPlaybook() {
     h('h3', {}, 'The amortisation loophole'),
     h('details', { class: 'card method' },
       h('summary', {}, h('span', { class: 'emoji', 'aria-hidden': 'true' }, AMORTISATION.emoji), h('span', { class: 'm-name' }, AMORTISATION.name)),
-      h('dl', {}, h('dt', {}, 'Theory'), h('dd', {}, AMORTISATION.theory), h('dt', {}, 'Red flags'), h('dd', {}, AMORTISATION.redFlags), h('dt', {}, 'Precedent'), h('dd', {}, AMORTISATION.precedent))));
+      h('dl', {}, h('dt', {}, 'Theory'), h('dd', {}, AMORTISATION.theory), h('dt', {}, 'Red flags'), h('dd', {}, AMORTISATION.redFlags), h('dt', {}, 'Precedent'), h('dd', {}, AMORTISATION.precedent))),
+    h('h3', {}, 'Nobbling the officials: the last line'),
+    h('p', {}, 'Every other trick is about money. This one is about the result itself, and it is the gravest thing in the game. Fly referees out for "unconnected" hospitality, and the close calls start going your way. It nudges you up the table — but match-fixing isn’t a points deduction, it’s titles stripped and expulsion, with no lawyer who can save you. It also quietly raises your suspicion every season, because the link you tried to hide is exactly what integrity units look for.'),
+    h('details', { class: 'card method ref' },
+      h('summary', {}, h('span', { class: 'emoji', 'aria-hidden': 'true' }, REFEREES.emoji), h('span', { class: 'm-name' }, REFEREES.name)),
+      h('dl', {}, h('dt', {}, 'Theory'), h('dd', {}, REFEREES.theory), h('dt', {}, 'What catches it'), h('dd', {}, REFEREES.redFlags), h('dt', {}, 'Precedent'), h('dd', {}, REFEREES.precedent))));
 }
 
 function openPlaybook() {

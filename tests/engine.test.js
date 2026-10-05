@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DIVISIONS, CLUBS, METHODS, BREACH_VECTORS, RESPONSES, OBSTRUCTIONS, EBT, HMRC } from '../js/data.js';
+import { DIVISIONS, CLUBS, METHODS, BREACH_VECTORS, RESPONSES, OBSTRUCTIONS, EBT, HMRC, REFEREES } from '../js/data.js';
 import {
   newGame, previewSeason, playSeason, hireLawyers, methodSuspicion, rattleRating, methodCap, genuineRevenue, defaultAlloc,
   resolveBreach, breachChance, projectedSecurity, exposure, securityMax,
   applyObstruction, previewObstruction,
   resolveHmrc, hmrcChance, hmrcBill, wouldLiquidate,
+  projectedInfluence, refPlaceBonus, matchFixingRisk, refMax,
   formatMoney, divisionByTier, finalScore, endingTitle, SEASONS,
 } from '../js/engine.js';
 
@@ -250,6 +251,37 @@ test('amortisation defers loss this season and can be clawed back later', () => 
   assert.ok(amort.deferredNow > 0);
 });
 
+test('referee spend builds influence, which decays when you stop', () => {
+  let g = newGame({ ...base, divisionId: 'prem', clubIndex: 0 });
+  const after = projectedInfluence(g, refMax(divisionByTier(g.tier)));
+  assert.ok(after > 0);
+  g.refInfluence = after;
+  assert.ok(projectedInfluence(g, 0) < after); // decays with no spend
+});
+
+test('referee influence improves league position and raises suspicion', () => {
+  const mk = (inf) => { let g = newGame({ ...base, divisionId: 'champ', clubIndex: 0 }); g.refInfluence = inf; g.suspicion = 40; return playSeason(g, zero(), () => 0.5); };
+  const clean = mk(0), bent = mk(100);
+  assert.ok(bent.report.position <= clean.report.position);     // same strength, better finish
+  assert.ok(refPlaceBonus(100) >= 2);
+  assert.ok(bent.game.suspicion >= clean.game.suspicion + 4);   // corruption leaves a trail
+});
+
+test('high referee influence can trigger a match-fixing scandal', () => {
+  let g = newGame({ ...base, divisionId: 'prem', clubIndex: 0 });
+  g.refInfluence = 100; g.trophies = 2;
+  const r = playSeason(g, zero(), () => 0.0); // force the low-probability branch
+  assert.equal(r.report.integrityScandal, true);
+  assert.equal(r.game.matchFixingScandal, true);
+  assert.ok(r.game.penalties.some((x) => /Match-fixing/.test(x))); // sanction recorded
+  assert.ok(finalScore(r.game) < finalScore({ ...r.game, matchFixingScandal: false }));
+});
+
+test('matchFixingRisk is zero without influence and positive with it', () => {
+  assert.equal(matchFixingRisk(0), 0);
+  assert.ok(matchFixingRisk(100) > 0);
+});
+
 test('a full game always terminates with a valid ending', () => {
   for (let seed = 0; seed < 200; seed++) {
     const rng = seeded(seed);
@@ -259,7 +291,7 @@ test('a full game always terminates with a valid ending', () => {
     while (!g.over && guard++ < 20) {
       const d = divisionByTier(g.tier);
       const alloc = Object.fromEntries(METHODS.map((m) => [m.id, rng() * d.scale * 10]));
-      alloc.ebt = rng() * d.scale * 8; if (seed % 3 === 0) alloc.amortise = true;
+      alloc.ebt = rng() * d.scale * 8; if (seed % 3 === 0) alloc.amortise = true; alloc.ref = rng() * d.scale * 4;
       alloc.equity = Math.min(alloc.equity, Number.isFinite(d.lossLimit) ? d.lossLimit : alloc.equity);
       const res = playSeason(g, alloc, rng);
       g = res.game;
