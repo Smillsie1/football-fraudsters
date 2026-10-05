@@ -202,6 +202,20 @@ export const METHODS = [
     precedent: 'Among the Premier League’s 2023 charges against Manchester City (the real one) were allegations about full disclosure of manager pay. The club denies all the charges.',
   },
   {
+    id: 'tpo', name: 'Third-Party Ownership (sell slices of your players)', emoji: '\u{1F9E9}',
+    risk: 0.5, kind: 'oneoff', capX: 1.5, banned: true,
+    theory: 'An investment fund buys a share of your players’ future transfer value upfront. You get a lump of cash now, booked as income. The fund gets a cut when the player is sold. Instant money with no visible owner involved.',
+    redFlags: 'It’s banned. FIFA outlawed third-party ownership in 2015. Using it risks a transfer embargo, not just a fine.',
+    precedent: 'West Ham were fined £5.5m in 2007 over the Carlos Tevez and Javier Mascherano third-party ownership arrangements. FIFA banned the practice worldwide in 2015.',
+  },
+  {
+    id: 'bungs', name: 'Inflated Agent Fees ("bungs")', emoji: '\u{1F91D}',
+    risk: 1.0, kind: 'offbook', capX: Infinity, inquiry: true,
+    theory: 'Overpay the agent on every transfer. The surplus quietly finds its way back to the right people, or pays a player off the books. The official fee looks almost plausible.',
+    redFlags: 'Follow-the-money audits of intermediary fees, and television documentaries with hidden cameras.',
+    precedent: 'The 2006 BBC Panorama "Undercover: Football’s Dirty Secrets" and the subsequent Lord Stevens inquiry examined hundreds of transfers for irregular payments to agents and managers.',
+  },
+  {
     id: 'briefcase', name: 'Brown Envelope at the Training Ground', emoji: '\u{1F4B0}',
     risk: 2.0, kind: 'offbook', capX: Infinity,
     theory: 'There is no theory.',
@@ -209,6 +223,34 @@ export const METHODS = [
     precedent: 'Please don’t.',
   },
 ];
+
+// The EBT scheme is handled as its own method kind: invisible to the football
+// regulator, but it builds a tax liability that a completely separate body --
+// the taxman -- will eventually come for.
+export const EBT = {
+  id: 'ebt', name: 'Pay players via an offshore trust (EBT)', emoji: '\u{1F3DB}️',
+  kind: 'ebt', taxRate: 0.45, // tax "saved" per £ routed, which becomes your liability
+  theory: 'Instead of a normal salary, a chunk of a player’s pay goes as a "loan" from an Employee Benefit Trust — a loan everyone understands will never be repaid. It isn’t taxed as income, so you field a strong squad far more cheaply. The football regulator doesn’t even see it. The taxman eventually will.',
+  redFlags: 'Her Majesty’s Revenue & Customs. Tax authorities move slowly, but they have the deepest pockets of any opponent and the courts tend to agree with them.',
+  precedent: 'Rangers used Employee Benefit Trusts from 2001. HMRC pursued the "Big Tax Case"; the scheme was ultimately ruled unlawful by the UK Supreme Court in 2017. The old company had already been liquidated in 2012 and the club was reformed in the fourth tier.',
+};
+
+// A per-season legal (for now) accounting choice, not a money slider.
+export const AMORTISATION = {
+  id: 'amortise', name: 'Sign players on ultra-long contracts', emoji: '\u{1F4C6}',
+  theory: 'Spread each transfer fee across a contract twice as long as normal. On paper your yearly cost halves, so you can spend far more before breaching the loss limit. Perfectly legal — today.',
+  redFlags: 'The rule-makers notice when everyone starts doing it. If they cap contract lengths retroactively, all that deferred cost lands at once.',
+  precedent: 'Chelsea handed out seven- and eight-year contracts in 2023 to spread transfer fees under FFP. UEFA responded by capping the accounting period at five years.',
+};
+
+// The taxman: a second enforcer, separate from football's regulators.
+export const HMRC = {
+  name: 'HM Revenue & Customs',
+  caseDelayMin: 3, caseDelayMax: 5, // slow: the real case ran for years
+  billMultiplier: 1.6,             // back-tax plus penalties and interest
+  // If the bill exceeds this share of the club's genuine revenue, it's insolvency.
+  liquidationRatio: 1.6,
+};
 
 export const LAWYERS = [
   { id: 'cousin', name: 'Your cousin who did a law module', costX: 0, delay: 1, defence: 0.05,

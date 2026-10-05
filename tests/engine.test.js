@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DIVISIONS, CLUBS, METHODS, BREACH_VECTORS, RESPONSES, OBSTRUCTIONS } from '../js/data.js';
+import { DIVISIONS, CLUBS, METHODS, BREACH_VECTORS, RESPONSES, OBSTRUCTIONS, EBT, HMRC } from '../js/data.js';
 import {
   newGame, previewSeason, playSeason, hireLawyers, methodSuspicion, rattleRating, methodCap, genuineRevenue, defaultAlloc,
   resolveBreach, breachChance, projectedSecurity, exposure, securityMax,
   applyObstruction, previewObstruction,
+  resolveHmrc, hmrcChance, hmrcBill, wouldLiquidate,
   formatMoney, divisionByTier, finalScore, endingTitle, SEASONS,
 } from '../js/engine.js';
 
@@ -185,6 +186,70 @@ test('every obstruction tactic is well-formed', () => {
   for (const o of OBSTRUCTIONS) { assert.ok(o.coverGain > 0); assert.ok(o.real && o.blurb); }
 });
 
+test('EBT buys squad strength invisibly to football but builds tax exposure', () => {
+  const g = newGame({ ...base, divisionId: 'prem', clubIndex: 0 });
+  const plain = previewSeason(g, zero());
+  const ebt = previewSeason(g, { ...zero(), ebt: 100 });
+  assert.ok(ebt.squadSpend > plain.squadSpend);     // stronger squad
+  assert.equal(ebt.addedSuspicion, 0);              // football can't see it
+  assert.equal(ebt.lossThisSeason, plain.lossThisSeason); // not an FFP loss
+  assert.ok(ebt.projectedTaxExposure > 0);          // but the taxman can
+});
+
+test('EBT spend accrues tax exposure into game state', () => {
+  let g = newGame({ ...base, divisionId: 'prem', clubIndex: 0 });
+  g = playSeason(g, { ...zero(), ebt: 200 }, seeded(5)).game;
+  assert.ok(Math.abs(g.taxExposure - 200 * EBT.taxRate) < 1e-6);
+});
+
+test('a big enough tax bill triggers liquidation', () => {
+  const g = newGame({ ...base, divisionId: 'champ', clubIndex: 0 });
+  const small = 1, huge = 100000;
+  assert.equal(wouldLiquidate(small, genuineRevenue(g)), false);
+  assert.equal(wouldLiquidate(huge, genuineRevenue(g)), true);
+  assert.ok(hmrcBill(100) > 100); // bill exceeds exposure (penalties + interest)
+});
+
+test('settling with HMRC costs less than the full bill and clears exposure', () => {
+  let g = newGame({ ...base, divisionId: 'prem', clubIndex: 0 });
+  g.taxExposure = 500; g.suspicion = 0;
+  g = playSeason(g, zero(), () => 0.0).game; // force HMRC to open (chance>0, rng 0)
+  const r = g.history[g.history.length - 1];
+  assert.ok(r.newHmrc, 'expected an HMRC case to open');
+  g = resolveHmrc(g, 'settle');
+  assert.equal(g.taxExposure, 0);
+  assert.ok(g.taxBillsPaid > 0 && g.taxBillsPaid < hmrcBill(500));
+});
+
+test('fighting HMRC schedules a delayed, resolvable case', () => {
+  let g = newGame({ ...base, divisionId: 'prem', clubIndex: 0 });
+  g.taxExposure = 500;
+  g = playSeason(g, zero(), () => 0.0).game;
+  g = resolveHmrc(g, 'fight', () => 0.0);
+  assert.equal(g.hmrcCases.length, 1);
+  assert.ok(g.hmrcCases[0].dueSeason > g.hmrcCases[0].seasonCharged);
+});
+
+test('hmrcChance is zero with no exposure and positive with exposure', () => {
+  assert.equal(hmrcChance(0, 100), 0);
+  assert.ok(hmrcChance(500, 100) > 0);
+});
+
+test('TPO and agent bungs exist as methods with real consequences flagged', () => {
+  const tpo = METHODS.find((m) => m.id === 'tpo');
+  const bungs = METHODS.find((m) => m.id === 'bungs');
+  assert.ok(tpo.banned);
+  assert.ok(bungs.inquiry);
+});
+
+test('amortisation defers loss this season and can be clawed back later', () => {
+  const g = newGame({ ...base, divisionId: 'prem', clubIndex: 0 });
+  const normal = previewSeason(g, { ...zero(), equity: 40 });
+  const amort = previewSeason(g, { ...zero(), equity: 40, amortise: true });
+  assert.ok(amort.lossThisSeason < normal.lossThisSeason);
+  assert.ok(amort.deferredNow > 0);
+});
+
 test('a full game always terminates with a valid ending', () => {
   for (let seed = 0; seed < 200; seed++) {
     const rng = seeded(seed);
@@ -194,11 +259,13 @@ test('a full game always terminates with a valid ending', () => {
     while (!g.over && guard++ < 20) {
       const d = divisionByTier(g.tier);
       const alloc = Object.fromEntries(METHODS.map((m) => [m.id, rng() * d.scale * 10]));
+      alloc.ebt = rng() * d.scale * 8; if (seed % 3 === 0) alloc.amortise = true;
       alloc.equity = Math.min(alloc.equity, Number.isFinite(d.lossLimit) ? d.lossLimit : alloc.equity);
       const res = playSeason(g, alloc, rng);
       g = res.game;
       if (!g.over) g = applyObstruction(g, seed % 2 ? ['slow'] : []);
       if (res.report.breach && !res.report.breach.resolved) g = resolveBreach(g, ['isolate','forensics','coverup','nothing'][seed % 4], rng).game;
+      if (res.report.newHmrc) g = resolveHmrc(g, seed % 2 ? 'settle' : 'fight', rng);
       if (res.report.newCase) g = hireLawyers(g, ['cousin', 'firm', 'everyone'][seed % 3]);
     }
     assert.ok(g.over, `seed ${seed} did not finish`);

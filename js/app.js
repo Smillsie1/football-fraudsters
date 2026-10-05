@@ -1,7 +1,7 @@
 // UI layer. Security rule: never use innerHTML. All text goes through textContent via h().
-import { DIVISIONS, CLUBS, METHODS, LAWYERS, RESPONSES, BREACH_VECTORS, OBSTRUCTIONS, STATES, TITLES, RULES_EXPLAINER, BLUEPRINT, SEASONS, FUND } from './data.js';
+import { DIVISIONS, CLUBS, METHODS, LAWYERS, RESPONSES, BREACH_VECTORS, OBSTRUCTIONS, EBT, AMORTISATION, HMRC, STATES, TITLES, RULES_EXPLAINER, BLUEPRINT, SEASONS, FUND } from './data.js';
 import {
-  newGame, previewSeason, playSeason, hireLawyers, resolveBreach, formatMoney, methodMax, methodCap,
+  newGame, previewSeason, playSeason, hireLawyers, resolveBreach, resolveHmrc, formatMoney, methodMax, methodCap,
   rattleRating, divisionByTier, finalScore, endingTitle, genuineRevenue, defaultAlloc,
   moneyLeague, fundShare, lastReport, securityMax, vectorById, responseById,
   applyObstruction, previewObstruction,
@@ -162,6 +162,7 @@ function buyClub(div, idx) {
 function statusBar(season = game.season) {
   const div = divisionByTier(game.tier);
   const openCase = game.cases.find((c) => !c.resolved);
+  const taxCase = game.hmrcCases.find((c) => !c.resolved);
   return h('div', { class: 'status card' },
     h('div', {},
       h('strong', { class: 'club-name' }, game.club.name),
@@ -169,7 +170,10 @@ function statusBar(season = game.season) {
     meter('Squad strength', game.strength, 100, 'good'),
     meter('Regulator suspicion', game.suspicion, 100, 'bad'),
     meter('Cyber security', game.security, 100, 'cyber'),
-    openCase ? h('p', { class: 'case-flag' }, `⚖️ ${openCase.charges} charges pending. Verdict due season ${openCase.verdictSeason}.`) : null);
+    openCase ? h('p', { class: 'case-flag' }, `⚖️ ${openCase.charges} charges pending. Verdict due season ${openCase.verdictSeason}.`) : null,
+    taxCase ? h('p', { class: 'case-flag' }, `\u{1F3DB}️ HMRC case: ${formatMoney(taxCase.bill)} bill, verdict due season ${taxCase.dueSeason}.`) : null,
+    (game.taxExposure > 0 && !taxCase) ? h('p', { class: 'muted small' }, `\u{1F3DB}️ Unpaid tax exposure: ${formatMoney(game.taxExposure)}.`) : null,
+    game.embargo > 0 ? h('p', { class: 'case-flag' }, `\u{1F6AB} Transfer embargo: ${game.embargo} season(s) left.`) : null);
 }
 
 const GROUPS = [
@@ -204,6 +208,8 @@ function screenSeason() {
       meter('Projected cyber security', p.projectedSecurity, 100, 'cyber'),
       h('p', { class: p.investigationChance > 0.35 ? 'warn' : '' }, `Chance of being rattled by the ${div.regulator} this season: `, h('strong', {}, pct(p.investigationChance))),
       h('p', { class: p.breachChance > 0.2 ? 'warn' : 'muted small' }, `Chance of a cyber incident this season: `, h('strong', {}, pct(p.breachChance)), `. If data leaks, ${pct(p.exposure)} of your operation is fake and would be exposed.`),
+      p.projectedTaxExposure > 0 ? h('p', { class: p.hmrcChance > 0.2 ? 'warn' : 'muted small' }, `Unpaid tax building up: `, h('strong', {}, formatMoney(p.projectedTaxExposure)), `. Chance the taxman opens a case: `, h('strong', {}, pct(p.hmrcChance)), '.') : null,
+      p.deferredNow > 0 ? h('p', { class: 'muted small' }, `Deferring ${formatMoney(p.deferredNow)} of this season’s loss via amortisation (total deferred: ${formatMoney(game.deferredLoss + p.deferredNow)}).`) : null,
       h('p', { class: p.breachesLossLimit ? 'warn' : 'muted small' }, lossLine, p.breachesLossLimit ? '. BREACH: automatic points deduction!' : ''),
       p.overCap.length ? h('p', { class: 'warn small' }, `Above fair market value: ${p.overCap.map((id) => METHODS.find((m) => m.id === id).name).join(', ')}`) : null);
   };
@@ -262,6 +268,36 @@ function screenSeason() {
         h('p', { class: 'muted small' }, `Current posture: ${Math.round(game.security)}/100. Think staff training, multi-factor authentication, endpoint protection, encrypted laptops and network segmentation.`)));
   };
 
+  const taxmanCard = () => {
+    const max = methodMax(EBT, div);
+    const ebtOut = h('output', { class: 'amount' }, formatMoney(alloc.ebt || 0));
+    const ebtSlider = h('input', {
+      type: 'range', min: '0', max: String(max), step: String(max / 200), value: String(alloc.ebt || 0),
+      'aria-label': 'EBT wage spend',
+      oninput: (e) => { alloc.ebt = Math.min(max, Math.max(0, Number(e.target.value) || 0)); ebtOut.textContent = formatMoney(alloc.ebt); updatePreview(); },
+    });
+    const amortCb = h('input', { type: 'checkbox', id: 'amortise-cb', checked: !!alloc.amortise,
+      onchange: (e) => { alloc.amortise = e.target.checked; updatePreview(); } });
+    return h('section', { class: 'group' },
+      h('h3', {}, '\u{1F3DB}️ The taxman’s blind spot'),
+      h('p', { class: 'muted small' }, 'The football regulator can’t see either of these. One hides wages from the tax office; the other bends the accounting rules. Both are a different kind of risk.'),
+      h('details', { class: 'method card ebt', open: true },
+        h('summary', {}, h('span', { class: 'emoji', 'aria-hidden': 'true' }, EBT.emoji), h('span', { class: 'm-name' }, EBT.name), h('span', { class: 'badge risk-3' }, 'HMRC risk')),
+        h('div', { class: 'slider-row' }, ebtSlider, ebtOut),
+        h('p', { class: 'muted small' }, `Buys squad strength cheaply and invisibly to football — but every ${formatMoney(1)} routed builds about ${formatMoney(EBT.taxRate)} of unpaid tax the taxman will eventually chase. Current exposure: ${formatMoney(game.taxExposure)}.`),
+        h('dl', {},
+          h('dt', {}, 'How it works in theory'), h('dd', {}, EBT.theory),
+          h('dt', {}, 'What catches it'), h('dd', {}, EBT.redFlags),
+          h('dt', {}, 'Real-world precedent'), h('dd', {}, EBT.precedent))),
+      h('label', { class: 'method card obstruct', for: 'amortise-cb' },
+        h('div', { class: 'obstruct-head' }, amortCb,
+          h('span', { class: 'emoji', 'aria-hidden': 'true' }, AMORTISATION.emoji),
+          h('span', { class: 'm-name' }, AMORTISATION.name),
+          h('span', { class: 'badge risk-2' }, 'Legal, for now')),
+        h('p', { class: 'muted small' }, AMORTISATION.theory),
+        h('p', { class: 'small' }, `\u{1F4A1} ${AMORTISATION.precedent}`)));
+  };
+
   updatePreview();
   render(
     statusBar(),
@@ -271,7 +307,7 @@ function screenSeason() {
       h('div', { class: 'methods' }, GROUPS.map((g) => h('section', { class: 'group' },
         h('h3', {}, g.title),
         h('p', { class: 'muted small' }, g.note),
-        METHODS.filter((m) => m.kind === g.kind).map(card))).concat(securityCard())),
+        METHODS.filter((m) => m.kind === g.kind).map(card))).concat(taxmanCard(), securityCard())),
       h('aside', {}, preview,
         h('button', { class: 'primary big full', onclick: () => {
           const res = playSeason(game, alloc);
@@ -317,6 +353,14 @@ function screenReport(r) {
       h('p', { class: 'strong' }, outcome),
       v.guilty ? h('p', { class: 'muted small' }, 'Your inflated deals have been restated to fair market value.') : null));
   }
+  for (const v of (r.hmrcVerdicts || [])) {
+    parts.push(h('div', { class: `card ${r.liquidation ? 'charged' : 'alert'}` },
+      h('h3', {}, '\u{1F3DB}️ The taxman’s verdict'),
+      h('p', { class: 'strong' }, v.won
+        ? 'You escaped on a technicality. No bill this time. Extraordinary luck.'
+        : r.liquidation ? `LIQUIDATION. The ${formatMoney(v.bill)} bill could not be paid.`
+          : `You owe ${formatMoney(v.bill)} in back-tax, penalties and interest. Paid, grudgingly.`)));
+  }
 
   // A live cyber incident blocks everything until the player responds.
   if (r.breach && !r.breach.resolved) {
@@ -325,6 +369,13 @@ function screenReport(r) {
     return;
   }
   if (r.breach && r.breach.resolved) parts.push(incidentOutcomeCard(r));
+
+  // A taxman's case also blocks until answered.
+  if (r.newHmrc && !r.newHmrc.resolved) {
+    parts.push(hmrcCard(r));
+    render(statusBar(r.season), ...parts);
+    return;
+  }
 
   const next = h('button', { class: 'primary big' });
   if (r.newCase) {
@@ -427,6 +478,25 @@ function incidentOutcomeCard(r) {
       : h('p', { class: 'strong' }, 'No measurable rise in suspicion. Crisis averted.'));
 }
 
+function hmrcCard(r) {
+  const nh = r.newHmrc;
+  const settleBill = nh.bill * 0.6;
+  return h('div', { class: 'card charged' },
+    h('p', { class: 'kicker' }, '\u{1F3DB}️ THE TAXMAN COMETH'),
+    h('h3', {}, `${HMRC.name} has opened an inquiry into your Employee Benefit Trust.`),
+    h('p', {}, `They assess ${formatMoney(nh.exposure)} of unpaid tax. With penalties and interest the full bill would be about ${formatMoney(nh.bill)}.`),
+    nh.liquidate ? h('p', { class: 'warn strong' }, 'Warning: that bill is more than the club could ever pay. Fighting and losing means liquidation.') : null,
+    h('div', { class: 'grid' },
+      h('button', { class: 'card choice', onclick: () => { game = resolveHmrc(game, 'settle'); game.over ? screenEnd() : screenReport(lastReport(game)); } },
+        h('strong', {}, '\u{1F91D} Settle quietly now'),
+        h('span', {}, `Pay a reduced ${formatMoney(settleBill)} immediately and wipe the slate. Certain, survivable, and it never reaches court.`),
+        h('span', { class: 'stats' }, h('span', {}, `Cost: ${formatMoney(settleBill)}`), h('span', {}, 'Risk: none'))),
+      h('button', { class: 'card choice risky', onclick: () => { game = resolveHmrc(game, 'fight'); game.over ? screenEnd() : screenReport(lastReport(game)); } },
+        h('strong', {}, '⚖️ Fight it, all the way to the Supreme Court'),
+        h('span', {}, 'Delay the reckoning by years. A slim chance of escaping on a technicality — but the scheme has been ruled unlawful before, and losing means the full bill.'),
+        h('span', { class: 'stats' }, h('span', {}, `If you lose: ${formatMoney(nh.bill)}`), h('span', {}, nh.liquidate ? 'Risk: LIQUIDATION' : 'Risk: a big bill later')))));
+}
+
 function screenCharged(r) {
   const div = divisionByTier(game.tier);
   return h('div', { class: 'card charged' },
@@ -468,6 +538,8 @@ function screenEnd() {
       h('dt', {}, 'Legal fees'), h('dd', {}, formatMoney(game.legalFees)),
       h('dt', {}, 'Cyber incidents survived'), h('dd', {}, `${game.breachesSurvived}${game.dataLeaked ? ' (but suffered a major leak)' : ''}`),
       h('dt', {}, 'Obstruction'), h('dd', {}, game.obstructionUsed ? `Deployed (cover level ${Math.round(game.coverLevel)}/100)` : 'None — a model of transparency'),
+      h('dt', {}, 'Tax bills paid'), h('dd', {}, game.taxBillsPaid > 0 ? formatMoney(game.taxBillsPaid) : (game.taxExposure > 0 ? `None yet (${formatMoney(game.taxExposure)} still owed)` : 'None')),
+      game.liquidated ? h('dt', {}, 'Liquidated') : null, game.liquidated ? h('dd', {}, 'Yes — the club died and was reborn in a lower division') : null,
       h('dt', {}, 'Trophies'), h('dd', {}, String(game.trophies)),
       h('dt', {}, 'Promotions / relegations'), h('dd', {}, `${game.promotions} / ${game.relegations}`),
       h('dt', {}, 'Penalties'), h('dd', {}, game.penalties.length ? h('ul', { class: 'penalties' }, game.penalties.map((x) => h('li', {}, x))) : 'None. Remarkable.'),
@@ -518,7 +590,16 @@ function buildPlaybook() {
     h('p', {}, 'If a regulator does come knocking, you don’t have to make it easy. After each season you can deploy delaying tactics. They mean fewer charges stick and verdicts take longer — which is how allegations become "time-barred" and drop away. The catch: stonewalling is itself suspicious, and failure to cooperate is one of the most serious charges a club can face. The real-world cases drag on for years precisely because of fights over disclosure.'),
     ...OBSTRUCTIONS.map((o) => h('details', { class: 'card method' },
       h('summary', {}, h('span', { class: 'emoji', 'aria-hidden': 'true' }, o.emoji), h('span', { class: 'm-name' }, o.name)),
-      h('dl', {}, h('dt', {}, 'The move'), h('dd', {}, o.blurb), h('dt', {}, 'What it mirrors'), h('dd', {}, o.real)))));
+      h('dl', {}, h('dt', {}, 'The move'), h('dd', {}, o.blurb), h('dt', {}, 'What it mirrors'), h('dd', {}, o.real)))),
+    h('h3', {}, 'The taxman: a second, deadlier enemy'),
+    h('p', {}, 'Football’s regulators can dock points. The tax office can end you. The Employee Benefit Trust scheme pays players through "loans" that are never repaid, dodging income tax and hiding the cost from football entirely. It builds an invisible liability — and HMRC is slow, near-impossible to beat in court, and its bill can be more than the club is worth. When Rangers fought and lost, the old company was liquidated and the club restarted in the fourth tier. Settling early is survivable; fighting to the end is a gamble with the club’s life.'),
+    h('details', { class: 'card method ebt' },
+      h('summary', {}, h('span', { class: 'emoji', 'aria-hidden': 'true' }, EBT.emoji), h('span', { class: 'm-name' }, EBT.name)),
+      h('dl', {}, h('dt', {}, 'Theory'), h('dd', {}, EBT.theory), h('dt', {}, 'What catches it'), h('dd', {}, EBT.redFlags), h('dt', {}, 'Precedent'), h('dd', {}, EBT.precedent))),
+    h('h3', {}, 'The amortisation loophole'),
+    h('details', { class: 'card method' },
+      h('summary', {}, h('span', { class: 'emoji', 'aria-hidden': 'true' }, AMORTISATION.emoji), h('span', { class: 'm-name' }, AMORTISATION.name)),
+      h('dl', {}, h('dt', {}, 'Theory'), h('dd', {}, AMORTISATION.theory), h('dt', {}, 'Red flags'), h('dd', {}, AMORTISATION.redFlags), h('dt', {}, 'Precedent'), h('dd', {}, AMORTISATION.precedent))));
 }
 
 function openPlaybook() {

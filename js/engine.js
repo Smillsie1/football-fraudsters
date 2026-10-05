@@ -6,7 +6,7 @@
 //   FFP loss       = owner equity (the only spend not covered by booked revenue)
 // So to spend big without breaching FFP you must make owner money look like revenue,
 // and fair market value only rises as the club genuinely gets bigger (brand).
-import { DIVISIONS, CLUBS, METHODS, LAWYERS, EVENTS, SEASONS, FUND, MONEY_LEAGUE, RIVAL_GROWTH, BREACH_VECTORS, RESPONSES, OBSTRUCTIONS } from './data.js';
+import { DIVISIONS, CLUBS, METHODS, LAWYERS, EVENTS, SEASONS, FUND, MONEY_LEAGUE, RIVAL_GROWTH, BREACH_VECTORS, RESPONSES, OBSTRUCTIONS, EBT, AMORTISATION, HMRC } from './data.js';
 
 export const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
 export const divisionByTier = (tier) => DIVISIONS.find((d) => d.tier === tier);
@@ -26,6 +26,7 @@ export function formatMoney(m) {
 }
 
 export function methodMax(method, div) {
+  if (method.kind === 'ebt') return div.scale * 50;
   return div.scale * (method.kind === 'recurring' ? 80 : 30);
 }
 
@@ -46,6 +47,14 @@ export function newGame({ owner, title, state, holdco, divisionId, clubIndex }) 
     dataLeaked: false,
     coverLevel: 0, // obstruction / non-cooperation, 0-100
     obstructionUsed: false,
+    taxExposure: 0,   // unpaid tax built up by the EBT scheme
+    hmrcCases: [],    // separate investigations by the taxman
+    taxBillsPaid: 0,
+    deferredLoss: 0,  // FFP losses pushed into the future by amortisation
+    amortiseUsed: false,
+    embargo: 0,       // seasons of transfer embargo remaining (from banned methods)
+    tpoUsed: false,
+    liquidated: false,
     suspicion: 0,
     season: 1,
     lossHistory: [],
@@ -173,24 +182,34 @@ export function previewSeason(game, alloc) {
     if (amt > methodCap(m, game)) overCap.push(m.id);
   }
   const secSpend = Math.max(0, alloc.security || 0);
+  const ebtSpend = Math.max(0, alloc.ebt || 0); // wages routed through the trust
+  const amortise = !!alloc.amortise;
   const booked = genuine + related + oneoff;
-  const squadSpend = booked * SQUAD_SHARE + equity + offbook;
+  // EBT and off-book money both buy squad strength without touching the FFP books.
+  const squadSpend = booked * SQUAD_SHARE + equity + offbook + ebtSpend;
   const typical = div.baseRevenue * SQUAD_SHARE;
   const target = 50 + 15 * Math.log2(Math.max(squadSpend, 1e-6) / typical);
   // Security spend is a legitimate operating cost, so it counts towards the loss limit.
-  const lossThisSeason = equity + secSpend;
+  // Amortisation lets you defer half of this season's loss into a growing pile.
+  const rawLoss = equity + secSpend;
+  const deferredNow = amortise ? rawLoss * 0.5 : 0;
+  const lossThisSeason = rawLoss - deferredNow;
   const recent = [...game.lossHistory.slice(-2), lossThisSeason];
   const rollingLoss = recent.reduce((a, b) => a + b, 0);
   const rollingLimit = div.lossLimit * 3;
   const projSusp = clamp(game.suspicion * 0.8 + susp, 0, 100);
   const projSecurity = projectedSecurity(game, secSpend);
+  const taxAccrued = ebtSpend * EBT.taxRate;
+  const projTaxExposure = game.taxExposure + taxAccrued;
   return {
     genuine, related, oneoff, equity, offbook, booked, squadSpend,
-    stateMoney: related + oneoff + equity + offbook,
-    secSpend, lossThisSeason,
+    stateMoney: related + oneoff + equity + offbook + ebtSpend,
+    secSpend, ebtSpend, amortise, deferredNow, lossThisSeason,
     projectedSecurity: projSecurity,
     breachChance: breachChance(projSecurity),
     exposure: exposure(game, { related, oneoff, offbook, genuine }),
+    taxAccrued, projectedTaxExposure: projTaxExposure,
+    hmrcChance: hmrcChance(projTaxExposure, genuine),
     addedSuspicion: susp,
     projectedSuspicion: projSusp,
     investigationChance: investigationChance(projSusp),
@@ -201,6 +220,15 @@ export function previewSeason(game, alloc) {
     league: moneyLeague(booked, game.season),
   };
 }
+
+// --- the taxman (HMRC): a second, separate enforcer ------------------------
+// Slow to move, but its case is near-unwinnable and its bill can liquidate you.
+export function hmrcChance(taxExposure, genuine) {
+  if (taxExposure <= 0) return 0;
+  return clamp(0.12 * (taxExposure / (genuine + taxExposure)) + taxExposure / 4000, 0.02, 0.5);
+}
+export const hmrcBill = (taxExposure) => taxExposure * HMRC.billMultiplier;
+export const wouldLiquidate = (taxExposure, genuine) => hmrcBill(taxExposure) > genuine * HMRC.liquidationRatio;
 
 function finishPosition(strength, div, rng) {
   const n = div.teams;
@@ -248,7 +276,8 @@ export function playSeason(prev, alloc, rng = Math.random) {
     revenue: p.booked, genuine: p.genuine, stateMoney: p.stateMoney,
     moneyRank: p.league.rank, events: [], news: [], position: 0, teams: div.teams,
     movement: null, newCase: null, verdicts: [], pointsDeducted: 0,
-    exposure: p.exposure, breach: null,
+    exposure: p.exposure, breach: null, newHmrc: null, hmrcVerdicts: [],
+    taxExposure: p.projectedTaxExposure, deferredLoss: game.deferredLoss + p.deferredNow,
   };
 
   if ((alloc.stadium || 0) > 0 && !game.stadiumSold) game.stadiumSold = true;
@@ -258,6 +287,28 @@ export function playSeason(prev, alloc, rng = Math.random) {
   game.security = p.projectedSecurity;
   game.strength = p.projectedStrength;
   game.suspicion = p.projectedSuspicion;
+  game.taxExposure = p.projectedTaxExposure;
+  if (p.amortise) { game.deferredLoss += p.deferredNow; game.amortiseUsed = true; }
+  if ((alloc.tpo || 0) > 0) game.tpoUsed = true;
+
+  // A transfer embargo (from banned methods) saps squad strength while it lasts.
+  if (game.embargo > 0) {
+    game.strength = clamp(game.strength - 10, 5, 99);
+    game.embargo -= 1;
+    report.news.push('Transfer embargo in effect: you cannot register new players. The squad weakens.');
+  }
+
+  // Third-party ownership is banned: using it risks a FIFA embargo.
+  if ((alloc.tpo || 0) > 0 && rng() < 0.3) {
+    game.embargo = 2;
+    game.suspicion = clamp(game.suspicion + 8, 0, 100);
+    report.news.push('FIFA: third-party ownership of players is prohibited. A two-season transfer embargo is imposed.');
+  }
+  // Inflated agent fees can surface in an exposé.
+  if ((alloc.bungs || 0) > 0 && rng() < 0.25) {
+    game.suspicion = clamp(game.suspicion + 10, 0, 100);
+    report.news.push('An undercover documentary airs footage of your agent meetings. Questions are asked in Parliament, and by the regulator.');
+  }
 
   // Scandals only stick if there is something to find.
   const stickiness = clamp(0.2 + p.addedSuspicion / 15, 0.2, 1);
@@ -283,6 +334,34 @@ export function playSeason(prev, alloc, rng = Math.random) {
     report.news.push(`${div.regulator}: owner-funded losses of ${formatMoney(p.rollingLoss)} over three seasons exceed the ${formatMoney(p.rollingLimit)} limit. ${div.ptsPenalty}-point deduction. You spent more than you earned. That’s the one rule.`);
     game.penalties.push(`${div.ptsPenalty}-point deduction for breaching the loss limit (season ${game.season})`);
     game.lossHistory = game.lossHistory.map(() => 0);
+  }
+
+  // Amortisation was legal when you did it, but the rule-makers can cap it retroactively.
+  if (game.deferredLoss > 0 && rng() < clamp(0.1 + game.season * 0.02, 0, 0.5)) {
+    report.pointsDeducted += div.ptsPenalty;
+    report.news.push(`Rule change: the accounting period for transfer fees is capped retroactively. ${formatMoney(game.deferredLoss)} of deferred losses must be booked at once — an instant breach. ${div.ptsPenalty}-point deduction.`);
+    game.penalties.push(`${div.ptsPenalty}-point deduction when deferred (amortised) losses were clawed back`);
+    game.deferredLoss = 0;
+  }
+
+  // The taxman's verdict on an EBT scheme (slow, but near-unwinnable).
+  for (const hc of game.hmrcCases) {
+    if (hc.resolved || hc.dueSeason !== game.season) continue;
+    hc.resolved = true;
+    if (rng() < 0.15) {
+      report.hmrcVerdicts.push({ won: true, bill: hc.bill });
+      report.news.push('HMRC: against the odds, the tribunal accepts a technical defence. No bill falls due this time.');
+    } else {
+      game.taxBillsPaid += hc.bill;
+      game.fundSpent += hc.bill;
+      game.taxExposure = Math.max(0, game.taxExposure - hc.covered);
+      report.hmrcVerdicts.push({ won: false, bill: hc.bill, liquidate: hc.liquidate });
+      if (hc.liquidate) applyLiquidation(game, report, hc.bill);
+      else {
+        game.penalties.push(`HMRC back-tax, penalties and interest: ${formatMoney(hc.bill)}`);
+        report.news.push(`HMRC: the Employee Benefit Trust scheme is ruled unlawful. The bill for back-tax, penalties and interest is ${formatMoney(hc.bill)}. Painful, but survivable — this time.`);
+      }
+    }
   }
 
   for (const c of game.cases) {
@@ -339,13 +418,65 @@ export function playSeason(prev, alloc, rng = Math.random) {
     report.breach = { vectorId: BREACH_VECTORS[Math.floor(rng() * BREACH_VECTORS.length)].id, resolved: false };
   }
 
+  // The taxman opens a case. Separate from football; slow; resolved by resolveHmrc().
+  const hmrcOpen = game.hmrcCases.some((c) => !c.resolved);
+  if (!hmrcOpen && !game.liquidated && rng() < hmrcChance(game.taxExposure, p.genuine)) {
+    report.newHmrc = {
+      exposure: game.taxExposure,
+      bill: hmrcBill(game.taxExposure),
+      liquidate: wouldLiquidate(game.taxExposure, p.genuine),
+    };
+  }
+
   report.strength = game.strength;
   report.suspicion = game.suspicion;
   game.history.push(report);
   game.season += 1;
-  // The season isn't "over" while a charge or an unresolved breach is still waiting on the player.
-  if (game.season > SEASONS && !report.newCase && !report.breach) game.over = true;
+  // The season isn't "over" while a decision (charge, breach, taxman) is still waiting on the player.
+  if (game.season > SEASONS && !report.newCase && !report.breach && !report.newHmrc) game.over = true;
   return { game, report };
+}
+
+function applyLiquidation(game, report, bill) {
+  game.liquidated = true;
+  report.liquidation = true;
+  const bottom = DIVISIONS[DIVISIONS.length - 1].tier;
+  const from = game.tier;
+  game.tier = Math.min(bottom, game.tier + 4);
+  game.relegations += 1;
+  game.strength = clamp(game.strength - 25, 5, 60);
+  game.brand = 1;
+  game.deals = { sponsor: 0, partners: 0 };
+  game.taxExposure = 0;
+  game.deferredLoss = 0;
+  game.penalties.push(`Liquidated over an unpayable ${formatMoney(bill)} tax bill; reformed ${game.tier - from} division(s) lower`);
+  report.news.push(`INSOLVENCY: the club cannot pay the ${formatMoney(bill)} bill. The company is liquidated and the club is reformed in a far lower division. This is exactly what happened to Rangers in 2012.`);
+}
+
+// The player's response to a taxman's case. Pure; returns a new game.
+export function resolveHmrc(prev, choice, rng = Math.random) {
+  const game = structuredClone(prev);
+  const report = game.history[game.history.length - 1];
+  const nh = report.newHmrc;
+  report.newHmrc = { ...nh, resolved: true, choice };
+  if (choice === 'settle') {
+    // Pay a reduced bill now, with certainty, and wipe the slate.
+    const bill = nh.bill * 0.6;
+    game.taxBillsPaid += bill;
+    game.fundSpent += bill;
+    game.taxExposure = 0;
+    game.penalties.push(`Settled with HMRC for ${formatMoney(bill)}`);
+    report.hmrcSettlement = bill;
+  } else {
+    // Fight it. Long delay (more time), but the scheme is near-impossible to defend.
+    const delay = HMRC.caseDelayMin + Math.floor(rng() * (HMRC.caseDelayMax - HMRC.caseDelayMin + 1));
+    game.hmrcCases.push({
+      covered: nh.exposure, bill: nh.bill, liquidate: nh.liquidate,
+      seasonCharged: report.season, dueSeason: report.season + delay, resolved: false,
+    });
+  }
+  if (game.season > SEASONS) game.over = true;
+  return game;
 }
 
 // Resolve a cyber incident. Returns { game, outcome } where outcome drives the UI.
@@ -417,6 +548,7 @@ export function finalScore(game) {
   let score = game.trophies * 150 + game.promotions * 100 - game.relegations * 80;
   score += (game.startTier - game.tier) * 50 - game.penalties.length * 60;
   if (game.tier === 1) score += 200;
+  if (game.liquidated) score -= 300;
   if (last) score += Math.max(0, MONEY_LEAGUE.length + 2 - last.moneyRank) * 60;
   return Math.round(score);
 }
@@ -424,6 +556,9 @@ export function finalScore(game) {
 export function endingTitle(game) {
   const last = lastReport(game);
   const pending = game.cases.filter((c) => !c.resolved);
+  const taxPending = game.hmrcCases.filter((c) => !c.resolved);
+  if (game.liquidated) return { title: 'Done a Rangers', blurb: 'The taxman got his money the only way left: by liquidating the club. You are starting again several divisions down. The trophies, awkwardly, stay in the cabinet.' };
+  if (taxPending.length) return { title: 'The Taxman Cometh', blurb: `You beat football’s regulators, but HMRC’s case lands in season ${taxPending[0].dueSeason}, and the courts rarely side with a "loan" nobody repaid.` };
   if (game.penalties.some((p) => p.startsWith('Expelled'))) return { title: 'Caught Red-Handed', blurb: 'The regulator actually did it. Somewhere, a pundit is still saying "they earned it".' };
   if (last?.moneyRank === 1 && pending.length) return { title: 'Richest Club on Earth (Allegedly)', blurb: `You out-earned Real Madreeed. The verdict on how is due in season ${pending[0].verdictSeason}. Until then you are, technically, a commercial genius.` };
   if (last?.moneyRank === 1) return { title: 'Richest Club on Earth', blurb: 'From nowhere to the top of the Money League. Deloitte sends a fruit basket. The fruit is from your state.' };
