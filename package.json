@@ -1,0 +1,10 @@
+{
+  "name": "sportswash-and-go",
+  "private": true,
+  "type": "module",
+  "description": "A satirical football ownership game.",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "start": "python3 -m http.server 8080"
+  }
+}
