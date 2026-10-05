@@ -40,8 +40,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
       # Publish only the public site files, never tests or package metadata.
       - run: |
           mkdir -p _site
