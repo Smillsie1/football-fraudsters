@@ -28,9 +28,13 @@ The **Playbook** (top right) explains how each method works in theory. It shows 
 
 ## Run locally
 ```bash
-npm start      # python3 -m http.server 8080 -> http://localhost:8080
-npm test       # node built-in test runner, zero dependencies
+python -m http.server 8080   # then open http://localhost:8080 (or: npm start)
+npm test                     # node built-in test runner, zero dependencies
 ```
+Opening `index.html` straight from disk won't work: browsers block ES modules on `file://`.
+
+## Contributing
+Improvements are welcome. Fork the repo, make your change and open a pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for the rules (tests green, no `innerHTML`, keep the satire fictional).
 
 ## Deploy
 The site is fully static. `.github/workflows/pages.yml` tests it, then publishes it to GitHub Pages on every push to `main`. One-time setup: **Settings → Pages → Source: GitHub Actions**. The repo must be public for free Pages.
@@ -44,3 +48,6 @@ The site is fully static. `.github/workflows/pages.yml` tests it, then publishes
 
 ## Disclaimer
 Satire. All clubs, states and owners are fictional parodies. References to real events are limited to matters of public record. Where a real club faces allegations, it denies them, and nothing here implies any finding of wrongdoing.
+
+## Licence
+[MIT](LICENSE) © 2026 Stuart Mills
