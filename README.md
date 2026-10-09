@@ -4,6 +4,9 @@ A satirical browser game. As a wealthy, state-backed owner, you buy a club anywh
 
 **Goal:** turn a club with little financial power into the highest-earning club in the world (top of the "Football Money League") within **10 seasons**.
 
+## v2: real-time edition (in progress)
+`v2/` is a faster, replayable take, open at `/v2/` when served. Seasons play out in real time: tap deal bubbles to bank money, shred leaks before they reach the press, and swipe Reigns-style decision cards. Two bars race each other, your Money League climb and the regulator's Case File, and the regulator learns the tricks you reuse. Runs earn up to three stars, and there's a seeded Daily Fixture with a shareable result. Balance is checked with `node tools/sim-v2.js`.
+
 ## The core rule: financial fair play
 You can only spend what you **earn**, plus a small allowed loss. Your sovereign fund is effectively unlimited (£600bn). The problem is getting that money into the club in a form the rules count as revenue.
 

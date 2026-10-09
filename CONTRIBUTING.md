@@ -28,6 +28,9 @@ npm test                     # Node's built-in test runner (Node 22+)
 - `js/app.js`: UI only. All DOM is built with the `h()` helper.
 - `css/style.css`: styles, light/dark via `prefers-color-scheme`.
 - `tests/engine.test.js`: tests, using a seeded RNG for determinism.
+- `v2/`: the real-time edition, with the same split (`v2/js/data.js`, `engine.js`,
+  `app.js`). Its tests are `tests/v2-engine.test.js`; check balance changes with
+  `node tools/sim-v2.js`.
 
 ## Rules for every change
 - **Keep `npm test` green.** New engine logic needs tests.
