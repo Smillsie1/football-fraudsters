@@ -94,6 +94,7 @@ export function newRun({ clubName = 'Sportswash FC', seed = 1 } = {}, rng = Math
     history: [],
     news: [],
     seenCards: [],
+    leaksLanded: 0,      // documents that reached the press
     over: null,          // { reason: 'complete' | 'expelled' | 'revolt' }
   };
   return s;
@@ -197,6 +198,7 @@ export function tick(s, dt, rng = Math.random) {
   for (const b of s.bubbles.filter((x) => x.type === 'leak' && x.x >= 1)) {
     s.caseFile = clamp(s.caseFile + LEAK_CASE * div.scrutiny, 0, 100);
     s.heat = clamp(s.heat + 3, 0, 100);
+    s.leaksLanded++;
     addNews(s, 'A document reached the press.', 'bad');
   }
   s.bubbles = s.bubbles.filter((b) => (b.type === 'deal' ? b.life > 0 : b.x < 1));

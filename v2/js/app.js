@@ -5,6 +5,7 @@ import {
   division, bookedRevenue, strength, moneyLeague, moneyRank, leagueTable, leaguePosition,
   ffpHeadroom, topUpAmount, methodById, stars, bestRank, endingTitle, shareText, fightOdds,
 } from './engine.js';
+import * as sound from './audio.js';
 
 const app = document.getElementById('app');
 const STEP = 0.05; // engine sub-step, seconds
@@ -18,6 +19,7 @@ let paused = false;
 let rafId = 0;
 let lastT = 0;
 let ui = null; // live references into the game screen
+let leaksHeard = 0;
 
 // --- tiny DOM helper -------------------------------------------------------
 function h(tag, props = {}, ...children) {
@@ -113,6 +115,8 @@ function startRun(isDaily) {
   const seed = isDaily ? dailySeed() : Math.floor(Math.random() * 2 ** 31);
   rng = mulberry32(seed);
   run = newRun({ clubName, seed }, rng);
+  leaksHeard = 0;
+  sound.unlock();
   speed = 1;
   paused = false;
   screenGame();
@@ -166,6 +170,9 @@ function screenGame() {
   );
   setSpeed(speed);
   sync();
+  sound.duck(false);
+  sound.startMusic();
+  sound.whistle();
   startLoop();
 }
 
@@ -177,6 +184,7 @@ function startLoop() {
 function stopLoop() {
   if (rafId) cancelAnimationFrame(rafId);
   rafId = 0;
+  sound.stopMusic();
 }
 
 function frame(now) {
@@ -186,6 +194,9 @@ function frame(now) {
     for (let left = dt; left > 1e-6; left -= STEP) tick(run, Math.min(STEP, left), rng);
   }
   sync();
+  sound.setHeat(run.heat);
+  sound.duck(paused || run.phase !== 'play');
+  if (run.leaksLanded > leaksHeard) { leaksHeard = run.leaksLanded; sound.leak(); }
   if (run.phase === 'card') { showCard(); }
   if (run.phase === 'seasonEnd') { stopLoop(); screenSeasonEnd(); return; }
   if (run.phase === 'over') { stopLoop(); screenEnd(); return; }
@@ -266,19 +277,22 @@ function floatText(x, y, text, cls) {
 function onCollect(id) {
   const b = run.bubbles.find((x) => x.id === id);
   const res = collect(run, id, rng);
-  if (res && b) floatText(b.x, b.y, `+${formatMoney(res.value)}  \u{1F525}+${Math.round(res.heat)}`, res.heat > 15 ? 'hot' : 'cash');
+  if (res && b) {
+    floatText(b.x, b.y, `+${formatMoney(res.value)}  \u{1F525}+${Math.round(res.heat)}`, res.heat > 15 ? 'hot' : 'cash');
+    if (b.infl >= 4) sound.bigCash(); else sound.coin();
+  }
   sync();
 }
 
 function onShred(id) {
   const b = run.bubbles.find((x) => x.id === id);
-  if (b && shred(run, id)) floatText(b.x, b.y, 'Shredded', 'shred');
+  if (b && shred(run, id)) { floatText(b.x, b.y, 'Shredded', 'shred'); sound.shred(); }
   sync();
 }
 
 function onTopUp() {
   const amt = topUp(run);
-  if (amt) floatText(0.5, 0.92, `+${formatMoney(amt)} owner equity`, 'cash');
+  if (amt) { floatText(0.5, 0.92, `+${formatMoney(amt)} owner equity`, 'cash'); sound.coin(); }
   sync();
 }
 
@@ -336,6 +350,8 @@ function showCard() {
   const answer = (side) => {
     if (!ui.overlay) return;
     const outcome = choose(run, side, rng);
+    sound.click();
+    if (outcome) setTimeout(c.hearing ? sound.gavel : sound.leak, 120);
     ui.overlay.remove();
     ui.overlay = null;
     if (outcome) floatText(0.5, 0.5, outcome, 'hot');
@@ -354,6 +370,7 @@ function showCard() {
   ui.overlay = h('div', { class: 'overlay' }, card);
   ui.overlay.answer = answer;
   document.body.append(ui.overlay);
+  if (c.hearing) sound.gavel(); else sound.cardIn();
   card.querySelector('.opt.left').focus({ preventScroll: true });
 }
 
@@ -400,6 +417,7 @@ function screenSeasonEnd() {
   const ls = run.lastSeason;
   const last = ls.seasonNo >= SEASONS;
   const move = ls.moved < 0 ? '⬆️ Promoted!' : ls.moved > 0 ? '⬇️ Relegated.' : '';
+  if (ls.moved < 0 || ls.pos === 1) sound.fanfare(); else if (ls.moved > 0) sound.sadTrombone(); else sound.whistle(true);
   render(h('section', { class: 'card announce big-result' },
     h('p', { class: 'kicker' }, `Season ${ls.seasonNo} of ${SEASONS} complete`),
     h('p', { class: 'position' }, ordinal(ls.pos), h('span', {}, ` of ${ls.teams} in the ${ls.division}`)),
@@ -423,6 +441,7 @@ function screenEnd() {
     try { await navigator.clipboard.writeText(text); status.textContent = 'Copied. Go and brag.'; } catch { status.textContent = 'Copy failed: select the text above instead.'; }
   };
   const lost = run.over.reason !== 'complete' || st === 0;
+  if (lost) sound.sadTrombone(); else sound.fanfare();
   render(h('section', { class: 'card announce big-result' },
     h('p', { class: 'kicker' }, daily ? `Daily Fixture #${run.seed}` : 'Final verdict'),
     h('h2', {}, endingTitle(run)),
@@ -446,6 +465,29 @@ function screenEnd() {
 // --- global wiring ------------------------------------------------------------
 document.getElementById('home-btn').addEventListener('click', screenIntro);
 
+const SOUND_MODES = [
+  ['all', '\u{1F50A} Sound on'],
+  ['sfx', '\u{1F509} Effects only'],
+  ['off', '\u{1F507} Muted'],
+];
+const soundBtn = document.getElementById('sound-btn');
+function showSoundMode() {
+  const m = SOUND_MODES.find((x) => x[0] === sound.getMode()) || SOUND_MODES[0];
+  soundBtn.textContent = m[1];
+  soundBtn.setAttribute('aria-label', `Sound: ${m[1]}. Click to change`);
+}
+soundBtn.addEventListener('click', () => {
+  const i = SOUND_MODES.findIndex((x) => x[0] === sound.getMode());
+  const next = SOUND_MODES[(i + 1) % SOUND_MODES.length][0];
+  sound.unlock();
+  sound.setMode(next);
+  save('sg2-sound', next);
+  showSoundMode();
+  sound.click();
+});
+sound.setMode(load('sg2-sound', 'all'));
+showSoundMode();
+
 document.addEventListener('keydown', (e) => {
   if (!run || e.target instanceof HTMLInputElement) return;
   if (ui?.overlay && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
@@ -461,6 +503,7 @@ document.addEventListener('keydown', (e) => {
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && run?.phase === 'play' && rafId) { paused = true; sync(); }
+  sound.suspend(document.hidden);
 });
 
 screenIntro();

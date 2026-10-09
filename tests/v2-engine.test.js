@@ -103,6 +103,7 @@ test('an unshredded leak grows the case file; a shredded one does not', () => {
   a.s.cardTimer = 99;
   tick(a.s, 0.1, a.rng);
   assert.ok(a.s.caseFile > 0);
+  assert.equal(a.s.leaksLanded, 1);
 
   const b = fresh();
   const leak = addLeak(b.s, 0.99);
