@@ -1,5 +1,12 @@
 # 🧼 Sportswash & Go — *115 Problems Edition*
 
+## ▶ [Play now](https://smillsie1.github.io/football-fraudsters/v2/)
+
+- **[Play v2, the real-time edition](https://smillsie1.github.io/football-fraudsters/v2/)**: grab deals, shred leaks, dodge dawn raids and newspaper stings.
+- **[Play v1, the original](https://smillsie1.github.io/football-fraudsters/)**: ten seasons of turn-based financial engineering.
+
+Free, runs in any browser on phone or desktop, nothing to install, no account.
+
 A satirical browser game. As a wealthy, state-backed owner, you buy a club anywhere in the English football pyramid, from the Premier League down to Sunday League Division 6. Then you try to pump in money without getting caught.
 
 **Goal:** turn a club with little financial power into the highest-earning club in the world (top of the "Football Money League") within **10 seasons**.
