@@ -546,7 +546,7 @@ function screenEnd() {
   const div = divisionByTier(game.tier);
   const last = lastReport(game);
   const startRevenue = game.history[0]?.genuine ?? 0;
-  const shareText = `I played Sportswash & Go as ${game.title} ${game.owner}. ${game.club.name} went from ${formatMoney(startRevenue)} to ${formatMoney(last.revenue)} revenue (${ordinal(last.moneyRank)} in the world). Rating: "${end.title}" (${score} pts).`;
+  const shareText = `I played Sportswash & Go as ${game.title} ${game.owner}. ${game.club.name} went from ${formatMoney(startRevenue)} to ${formatMoney(last.revenue)} revenue (${ordinal(last.moneyRank)} in the world). Rating: "${end.title}" (${score} pts). Play: https://smillsie1.github.io/football-fraudsters/`;
   const copied = h('span', { class: 'muted small', role: 'status' });
   render(h('section', { class: 'card announce' },
     h('p', { class: 'kicker' }, 'FINAL WHISTLE'),

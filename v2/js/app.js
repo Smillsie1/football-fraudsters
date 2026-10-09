@@ -10,6 +10,7 @@ import {
 import * as sound from './audio.js';
 
 const app = document.getElementById('app');
+const SITE_URL = 'https://smillsie1.github.io/football-fraudsters/v2/';
 const STEP = 0.05; // engine sub-step, seconds
 
 let run = null;
@@ -646,7 +647,7 @@ function screenEnd() {
   const st = stars(run);
   if (st > load('sg2-best', 0)) save('sg2-best', st);
   if (daily) save(`sg2-daily-${run.seed}`, { stars: st });
-  const text = shareText(run, daily);
+  const text = `${shareText(run, daily)}\nPlay: ${SITE_URL}`;
   const status = h('p', { class: 'muted small', 'aria-live': 'polite' });
   const copy = async () => {
     try { await navigator.clipboard.writeText(text); status.textContent = 'Copied. Go and brag.'; } catch { status.textContent = 'Copy failed: select the text above instead.'; }

@@ -43,7 +43,7 @@ jobs:
       # Publish only the public site files, never tests or package metadata.
       - run: |
           mkdir -p _site
-          cp -r index.html css js v2 _site/
+          cp -r index.html sitemap.xml css js img v2 _site/
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site

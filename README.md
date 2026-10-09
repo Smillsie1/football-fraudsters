@@ -54,7 +54,7 @@ The site is fully static. `.github/workflows/pages.yml` tests it, then publishes
 - **Strict Content Security Policy:** same-origin scripts and styles only, no inline JS, `connect-src 'none'`, `form-action 'none'`.
 - **No `innerHTML` anywhere.** All text is rendered via `textContent`, so names can't inject scripts (XSS).
 - **Zero npm dependencies**, so there is no supply-chain attack surface.
-- The deploy workflow uses least-privilege permissions and publishes only `index.html`, `css/` and `js/`.
+- The deploy workflow uses least-privilege permissions and publishes only the game files: `index.html`, `css/`, `js/`, `img/`, `v2/` and `sitemap.xml`.
 
 ## Disclaimer
 Satire. All clubs, states and owners are fictional parodies. References to real events are limited to matters of public record. Where a real club faces allegations, it denies them, and nothing here implies any finding of wrongdoing.
