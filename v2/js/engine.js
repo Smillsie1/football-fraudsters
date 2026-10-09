@@ -9,6 +9,7 @@
 import {
   SEASONS, SEASON_SECONDS, WEEKS, SQUAD_SHARE, DEAL_TERM, MAX_CHARGES, DIVISIONS, START,
   METHODS, INFLATION, MONEY_LEAGUE, RIVAL_GROWTH, TOWNS, SUFFIXES, CARDS,
+  CONTACTS, TELLS, SMALL_TALK, STING, NEWSPAPER,
 } from './data.js';
 
 export const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
@@ -20,6 +21,7 @@ const sig = (x) => 1 / (1 + Math.exp(-x));
 const DEAL_LIFE = 5.5;       // seconds a deal bubble stays on screen
 const LEAK_CASE = 6;         // case file per un-shredded leak (x scrutiny)
 const CARD_GAP = [18, 28];   // seconds between choice cards
+const DOOR_LIFE = 7;         // seconds the back-room door stays open
 const HEAT_DECAY = 1.5;      // heat lost per second
 const COLD_CASE = 0.15;      // case file lost per second while heat is low
 
@@ -88,13 +90,18 @@ export function newRun({ clubName = 'Sportswash FC', seed = 1 } = {}, rng = Math
     dealTimer: 1.5,
     leakTimer: 1,
     cardTimer: 12,
-    phase: 'play',       // play | card | seasonEnd | over
+    phase: 'play',       // play | card | meeting | seasonEnd | over
     card: null,
     lastSeason: null,
     history: [],
     news: [],
     seenCards: [],
     leaksLanded: 0,      // documents that reached the press
+    doorWeek: 6 + Math.floor(rng() * 24), // when this season's back-room invitation appears
+    doorShown: false,
+    meeting: null,       // the back-room meeting in progress
+    expose: null,        // a sting awaiting publication: { weeks, severity, quote }
+    stings: 0,           // stings published so far
     over: null,          // { reason: 'complete' | 'expelled' | 'revolt' }
   };
   return s;
@@ -165,6 +172,7 @@ function playWeek(s, rng) {
   s.pts += pts;
   s.fans = clamp(s.fans + (pts === 3 ? 1.2 : pts === 0 ? -1.4 : 0), 0, 100);
   s.week++;
+  if (s.expose) s.expose.weeks--;
   return pts;
 }
 
@@ -191,9 +199,14 @@ export function tick(s, dt, rng = Math.random) {
   s.leakTimer -= dt * (0.03 + 0.25 * s.heat / 100);
   if (s.leakTimer <= 0) { spawnLeak(s, rng); s.leakTimer = 0.5 + rng(); }
 
+  if (!s.doorShown && s.week >= s.doorWeek) {
+    s.doorShown = true;
+    s.bubbles.push({ id: s.nextId++, type: 'door', x: 0.15 + 0.6 * rng(), y: 0.2 + 0.6 * rng(), life: DOOR_LIFE, maxLife: DOOR_LIFE });
+  }
+
   for (const b of s.bubbles) {
-    if (b.type === 'deal') b.life -= dt;
-    else b.x += b.speed * dt;
+    if (b.type === 'leak') b.x += b.speed * dt;
+    else b.life -= dt;
   }
   for (const b of s.bubbles.filter((x) => x.type === 'leak' && x.x >= 1)) {
     s.caseFile = clamp(s.caseFile + LEAK_CASE * div.scrutiny, 0, 100);
@@ -201,10 +214,11 @@ export function tick(s, dt, rng = Math.random) {
     s.leaksLanded++;
     addNews(s, 'A document reached the press.', 'bad');
   }
-  s.bubbles = s.bubbles.filter((b) => (b.type === 'deal' ? b.life > 0 : b.x < 1));
+  s.bubbles = s.bubbles.filter((b) => (b.type === 'leak' ? b.x < 1 : b.life > 0));
 
   if (s.fans <= 0) return finish(s, 'revolt');
   if (s.caseFile >= 100) return openHearing(s);
+  if (s.expose && s.expose.weeks <= 0) return openExpose(s);
   if (s.week >= WEEKS) return endSeason(s, rng);
 
   s.cardTimer -= dt;
@@ -281,6 +295,7 @@ function applyFx(s, fx) {
   if (fx.spend) s.cardSpend += fx.spend * sc;
   if (fx.oneoff) s.oneoff += fx.oneoff * sc;
   if (fx.points) s.pts += fx.points;
+  if (fx.deal) s.deals.push({ methodId: 'backroom', value: fx.deal * sc, left: DEAL_TERM });
 }
 
 // side: 'left' | 'right'. Returns a short outcome line for the UI.
@@ -289,7 +304,10 @@ export function choose(s, side, rng = Math.random) {
   const c = s.card;
   const opt = c[side];
   let outcome = '';
-  if (c.hearing) {
+  if (c.expose) {
+    outcome = resolveExpose(s, side, rng);
+    s.card = null;
+  } else if (c.hearing) {
     const div = division(s);
     if (side === 'left') {
       s.pts -= div.ptsPenalty; s.charges++; s.caseFile = 35; s.heat *= 0.6;
@@ -316,6 +334,104 @@ export function choose(s, side, rng = Math.random) {
   s.phase = 'play';
   if (s.fans <= 0) finish(s, 'revolt');
   return outcome;
+}
+
+// --- the back room ------------------------------------------------------------------
+// A secret meeting: three rounds of push-your-luck. The room may be wired, and
+// nothing tells you for sure, but tells turn up more often when it is.
+export const contactById = (id) => CONTACTS.find((c) => c.id === id);
+export const wiredChance = (s, contact) =>
+  clamp(STING.base + STING.perHeat * (s.heat / 100) + STING.perSting * s.stings + contact.risk, 0, 0.9);
+
+function narrate(s, rng) {
+  const m = s.meeting;
+  const tell = rng() < (m.wired ? STING.tellIfWired : STING.tellIfClean);
+  const pool = tell ? TELLS.filter((t) => !m.lines.includes(t)) : SMALL_TALK.filter((t) => !m.lines.includes(t));
+  m.lines.push(pickFrom(pool.length ? pool : SMALL_TALK, rng));
+}
+
+export function enterMeeting(s, id, rng = Math.random) {
+  const b = s.bubbles.find((x) => x.id === id && x.type === 'door');
+  if (!b || s.phase !== 'play') return null;
+  s.bubbles = s.bubbles.filter((x) => x !== b);
+  const contact = pickFrom(CONTACTS, rng);
+  s.meeting = { contactId: contact.id, wired: rng() < wiredChance(s, contact), round: 0, tape: 0, said: [], lines: [] };
+  narrate(s, rng);
+  s.phase = 'meeting';
+  return s.meeting;
+}
+
+// Pick option i of the current round. Favours land straight away.
+export function meetingSay(s, i, rng = Math.random) {
+  const m = s.meeting;
+  if (s.phase !== 'meeting' || !m) return null;
+  const contact = contactById(m.contactId);
+  const opt = contact.rounds[m.round]?.options[i];
+  if (!opt) return null;
+  applyFx(s, opt.fx);
+  m.tape += opt.tape;
+  m.said.push(opt);
+  m.round++;
+  if (m.round >= contact.rounds.length) return leaveMeeting(s, rng);
+  narrate(s, rng);
+  return { done: false };
+}
+
+// Walk out (or finish). If the room was wired and you said anything usable,
+// the paper starts "seeking comment" and the story lands a few weeks later.
+export function leaveMeeting(s, rng = Math.random) {
+  const m = s.meeting;
+  if (s.phase !== 'meeting' || !m) return null;
+  let result = 'clean';
+  if (m.wired && m.tape > 0) {
+    const worst = m.said.reduce((a, b) => (b.tape > (a?.tape ?? -1) ? b : a), null);
+    const [lo, hi] = STING.weeks;
+    s.expose = { weeks: lo + Math.floor(rng() * (hi - lo + 1)), severity: m.tape, quote: worst.label };
+    addNews(s, `${NEWSPAPER} is "seeking comment" about a recent meeting.`, 'bad');
+    result = 'stung';
+  } else if (m.wired) {
+    addNews(s, `The "contact" was a ${NEWSPAPER} reporter. They got nothing usable.`);
+    result = 'dodged';
+  }
+  s.meeting = null;
+  s.phase = 'play';
+  if (s.fans <= 0) finish(s, 'revolt');
+  return { done: true, result };
+}
+
+function openExpose(s) {
+  const e = s.expose;
+  s.card = {
+    id: 'expose', expose: true, who: '\u{1F5DE}️', speaker: `${NEWSPAPER}, front page`,
+    text: `STING: ${s.club} chief caught on camera: "${e.quote}"`,
+    left: { label: 'Seek a super-injunction', odds: STING.injunction },
+    right: { label: 'No comment. Ride it out.' },
+  };
+  s.phase = 'card';
+}
+
+// Grows faster than the tape: a slip stings, a full confession means a hearing.
+export function exposePenalty(severity) {
+  return { case: 6 * severity + 1.5 * severity ** 2, heat: 12 * severity, fans: -4 * severity };
+}
+
+function resolveExpose(s, side, rng) {
+  let sev = s.expose.severity;
+  s.expose = null;
+  if (side === 'left') {
+    if (rng() < STING.injunction) {
+      s.heat = clamp(s.heat + 8, 0, 100);
+      const msg = 'Injunction granted. Nobody knows what it\'s about. Everyone knows what it\'s about.';
+      addNews(s, msg);
+      return msg;
+    }
+    sev++;
+  }
+  s.stings++;
+  applyFx(s, exposePenalty(sev));
+  const msg = side === 'left' ? 'Injunction refused, and now it\'s an even bigger story.' : 'The story runs. Every channel has the footage.';
+  addNews(s, msg, 'bad');
+  return msg;
 }
 
 // --- season end ----------------------------------------------------------------
@@ -348,6 +464,8 @@ function endSeason(s, rng) {
   s.pts = ffpBreach ? -next.ptsPenalty : 0;
   if (ffpBreach) s.caseFile = clamp(s.caseFile + 15, 0, 100);
   s.table = makeTable(next, rng, s.club);
+  s.doorWeek = 6 + Math.floor(rng() * 24);
+  s.doorShown = false;
   s.bubbles = [];
   s.week = 0; s.clock = 0;
   s.dealTimer = 1.5; s.leakTimer = 1;

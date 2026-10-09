@@ -128,3 +128,128 @@ export const TAUNTS = [
   'Derek is laughing. Derek never laughs.',
   'Derek has framed your airline contract.',
 ];
+
+// --- The Back Room: secret meetings that might be newspaper stings ------------
+// Based on public-record undercover stings, such as the 2016 Telegraph
+// investigation that ended an England manager's tenure after one match.
+// Each option: tone (safe | bold | reckless), tape (how incriminating it is if
+// the room is wired), fx (same keys as cards, plus deal: a recurring deal).
+export const NEWSPAPER = 'The Sunday Clarion';
+export const STING = {
+  base: 0.06,        // chance a room is wired at zero heat
+  perHeat: 0.18,     // extra chance at full heat
+  perSting: 0.08,    // papers sniff harder after each published sting
+  tellIfWired: 0.55, // chance a round shows a tell when the room is wired
+  tellIfClean: 0.2,  // chance of a red-herring tell when it isn't
+  injunction: 0.4,   // chance a super-injunction kills the story
+  weeks: [2, 4],     // weeks between "seeking comment" and the front page
+};
+
+export const TELLS = [
+  'He asks you to repeat the figure, "just so I\'m clear".',
+  'There\'s a small, neat hole in the fruit bowl.',
+  'His company\'s website went live last Tuesday.',
+  'He orders a sparkling water and never touches it.',
+  'His cufflink seems to blink.',
+  'He keeps angling his briefcase towards you.',
+  'The hotel suite was booked under the name "Mr Clarion".',
+  'He laughs a beat too late at all your jokes.',
+];
+export const SMALL_TALK = [
+  'The coffee is excellent.',
+  'He talks about golf for ten minutes.',
+  'Somewhere below, a string quartet is murdering Vivaldi.',
+  'He admires your watch. You admire his.',
+  'The view of the marina is spectacular.',
+];
+
+export const CONTACTS = [
+  { id: 'investor', who: '\u{1F935}', name: 'An "investor" from Pinnacle Horizon Holdings', risk: 0.04,
+    intro: 'A smiling man in a hotel suite says his clients are "very keen on English football".',
+    rounds: [
+      { prompt: 'My clients want a slice of your players\' transfer rights. Is that... allowed?',
+        options: [
+          { tone: 'safe', label: 'Strictly by the book, I\'m afraid.', tape: 0, fx: {} },
+          { tone: 'bold', label: 'There are ways round it.', tape: 1, fx: { spend: 2 } },
+          { tone: 'reckless', label: 'Rules are for small clubs. Here\'s how we did it last time.', tape: 2, fx: { spend: 4 } },
+        ] },
+      { prompt: 'And the regulator? Would they need to know?',
+        options: [
+          { tone: 'safe', label: 'Everything goes through the lawyers.', tape: 0, fx: {} },
+          { tone: 'bold', label: 'They only see what we file.', tape: 1, fx: { case: -6 } },
+          { tone: 'reckless', label: 'Derek owes me a favour. Several.', tape: 2, fx: { case: -12 } },
+        ] },
+      { prompt: 'Shall we say a £400,000 "speaking fee" for you personally?',
+        options: [
+          { tone: 'safe', label: 'I\'ll have to decline.', tape: 0, fx: { heat: -5 } },
+          { tone: 'bold', label: 'Paid to a consultancy, perhaps.', tape: 1, fx: { oneoff: 2 } },
+          { tone: 'reckless', label: 'Cash. In a bag. Today.', tape: 2, fx: { oneoff: 4 } },
+        ] },
+    ] },
+  { id: 'fixer', who: '\u{1F9D4}', name: 'A minister\'s "fixer"', risk: 0.02,
+    intro: 'In a private members\' club, a man who "doesn\'t officially work for anyone" pours two whiskies.',
+    rounds: [
+      { prompt: 'The ministry would love a new partnership with your club. How big?',
+        options: [
+          { tone: 'safe', label: 'Market rate, independently valued.', tape: 0, fx: { deal: 1 } },
+          { tone: 'bold', label: 'Whatever makes the accounts work.', tape: 1, fx: { deal: 2.5 } },
+          { tone: 'reckless', label: 'Ten times market rate. We\'ll call it "brand synergy".', tape: 2, fx: { deal: 5 } },
+        ] },
+      { prompt: 'The new football regulator. Friendly faces on the board would help, no?',
+        options: [
+          { tone: 'safe', label: 'I couldn\'t possibly comment.', tape: 0, fx: {} },
+          { tone: 'bold', label: 'I have a few names in mind.', tape: 1, fx: { case: -8 } },
+          { tone: 'reckless', label: 'Put my brother-in-law in charge of it.', tape: 2, fx: { case: -15 } },
+        ] },
+      { prompt: 'And the journalists asking questions about all this?',
+        options: [
+          { tone: 'safe', label: 'They\'re just doing their jobs.', tape: 0, fx: { heat: -4 } },
+          { tone: 'bold', label: 'A few lawyers\' letters should do it.', tape: 1, fx: { heat: -8 } },
+          { tone: 'reckless', label: 'Find out where they live.', tape: 3, fx: { heat: -15 } },
+        ] },
+    ] },
+  { id: 'agent', who: '\u{1F574}️', name: 'A super-agent', risk: 0.03,
+    intro: 'On a yacht in the marina, a man with three phones waves you aboard.',
+    rounds: [
+      { prompt: 'My client will sign for you. But he needs... encouragement.',
+        options: [
+          { tone: 'safe', label: 'He gets the contract. That\'s it.', tape: 0, fx: {} },
+          { tone: 'bold', label: 'Image rights, through Bermuda.', tape: 1, fx: { spend: 2.5 } },
+          { tone: 'reckless', label: 'A "loyalty bonus" nobody needs to know about.', tape: 2, fx: { spend: 5 } },
+        ] },
+      { prompt: 'And for me? A small fee, for my trouble.',
+        options: [
+          { tone: 'safe', label: 'The standard agent\'s fee.', tape: 0, fx: {} },
+          { tone: 'bold', label: 'Split across three of your companies.', tape: 1, fx: { spend: 1.5 } },
+          { tone: 'reckless', label: 'Name your number. Cash is fine.', tape: 2, fx: { spend: 3 } },
+        ] },
+      { prompt: 'The manager would like a cut too. He\'s on the deck.',
+        options: [
+          { tone: 'safe', label: 'Tell him to get off my boat.', tape: 0, fx: { fans: 2 } },
+          { tone: 'bold', label: 'He can have a "consultancy".', tape: 1, fx: { spend: 1.5 } },
+          { tone: 'reckless', label: 'Get him down here. Bring the envelope.', tape: 2, fx: { spend: 3 } },
+        ] },
+    ] },
+  { id: 'referee', who: '\u{1F9D1}‍⚖️', name: 'A "friend" of the referees\' association', risk: 0.05,
+    intro: 'In the back of a restaurant, a man in a blazer orders the most expensive wine on the list.',
+    rounds: [
+      { prompt: 'The lads work so hard. A holiday would do them good, wouldn\'t it?',
+        options: [
+          { tone: 'safe', label: 'I\'m sure they\'ll book one.', tape: 0, fx: {} },
+          { tone: 'bold', label: 'Our sponsors run a lovely resort.', tape: 1, fx: { points: 2 } },
+          { tone: 'reckless', label: 'Five-star, all paid. Name the dates.', tape: 2, fx: { points: 4 } },
+        ] },
+      { prompt: 'There\'s a big match next month. Tight decisions can go either way.',
+        options: [
+          { tone: 'safe', label: 'May the best team win.', tape: 0, fx: { fans: 2 } },
+          { tone: 'bold', label: 'It would be nice if they went our way.', tape: 1, fx: { points: 2 } },
+          { tone: 'reckless', label: 'Penalty in the 89th minute. Non-negotiable.', tape: 3, fx: { points: 5 } },
+        ] },
+      { prompt: 'And the VAR room? Very boring in there, I hear.',
+        options: [
+          { tone: 'safe', label: 'Let\'s leave VAR alone.', tape: 0, fx: {} },
+          { tone: 'bold', label: 'Maybe a nice hamper.', tape: 1, fx: { points: 1 } },
+          { tone: 'reckless', label: 'Send them a hamper. And a car.', tape: 2, fx: { points: 3 } },
+        ] },
+    ] },
+];

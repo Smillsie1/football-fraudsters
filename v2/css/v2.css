@@ -150,6 +150,55 @@ table.mini tr.down td:first-child { box-shadow: inset 3px 0 var(--bad); }
 .swipe-hint { margin: 10px 0 0; }
 @keyframes card-in { from { transform: translateY(30px) scale(.95); opacity: 0; } }
 
+/* the back room */
+.door {
+  --life: 1;
+  width: 80px; height: 80px;
+  background:
+    radial-gradient(circle closest-side, #3b2414 86%, transparent 88%),
+    conic-gradient(var(--gold) calc(var(--life) * 360deg), rgb(255 255 255 / .2) 0);
+  color: #f5e6c8;
+  animation: pop-in .18s ease-out, glow 1.2s ease-in-out infinite alternate;
+}
+.room-overlay { background: rgb(8 4 2 / .78); }
+.room {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: #1e1510;
+  color: #f3e9dc;
+  border: 1px solid #5a4030;
+  border-radius: 18px;
+  padding: 20px;
+  box-shadow: 0 12px 50px rgb(0 0 0 / .6);
+  animation: card-in .22s ease-out;
+}
+.room .muted { color: #bba68f; }
+.room-head { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+.room-head .who { font-size: 2.6rem; line-height: 1; }
+.room-head p { margin: 2px 0 0; }
+.room-notes { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 4px; font-style: italic; font-size: .9rem; color: #d9c7b0; }
+.room-notes li::before { content: "\2026 "; }
+.room-prompt { font-size: 1.15rem; font-weight: 700; }
+.room-options { display: grid; gap: 8px; }
+.say {
+  display: grid; gap: 2px; text-align: left;
+  background: #2b1f17; color: inherit; border: 1px solid #5a4030;
+}
+.say .tone { font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.say.safe .tone { color: #7fd3a8; }
+.say.bold .tone { color: #f0b54a; }
+.say.reckless .tone { color: #ff7a7a; }
+.say:hover { border-color: var(--gold); }
+.say.reckless:hover { border-color: var(--bad); }
+.room-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin: 14px 0 8px; }
+.room-foot .ghost { color: inherit; border-color: #5a4030; }
+.tape { font-size: .9rem; font-weight: 600; }
+.room.result-stung { border-color: var(--bad); }
+.room.result-dodged { border-color: var(--good); }
+.swipe-card.expose { border: 2px solid var(--ink); font-family: Georgia, "Times New Roman", serif; }
+.swipe-card.expose .card-text { font-size: 1.25rem; text-transform: uppercase; letter-spacing: .02em; }
+
 /* results */
 .stars { font-size: 2.4rem; margin: 0 0 8px; letter-spacing: .1em; }
 .taunt { font-weight: 700; color: var(--bad); }
@@ -157,7 +206,7 @@ table.mini tr.down td:first-child { box-shadow: inset 3px 0 var(--bad); }
 table.history { margin: 10px 0; }
 
 @media (prefers-reduced-motion: reduce) {
-  .deal, .deal.infl-4, .swipe-card { animation: none; }
+  .deal, .deal.infl-4, .door, .room, .swipe-card { animation: none; }
   .float { animation: fade-out 1s linear forwards; }
 }
 @keyframes fade-out { to { opacity: 0; } }

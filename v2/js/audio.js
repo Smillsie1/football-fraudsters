@@ -177,6 +177,32 @@ export function sadTrombone() {
   tone(330, t + 1.26, 1.1, { type: 'sawtooth', gain: 0.09, slideTo: 262, attack: 0.03 });
 }
 
+// A creaky door: a low, wobbling glide through a filtered rasp.
+export function door() {
+  if (!ready()) return;
+  const t = now();
+  tone(110, t, 0.5, { type: 'sawtooth', gain: 0.05, slideTo: 70, attack: 0.05 });
+  noise(t, 0.45, { gain: 0.08, freq: 500, sweepTo: 250 });
+}
+
+export function heartbeat() {
+  if (!ready()) return;
+  const t = now();
+  tone(60, t, 0.16, { type: 'sine', gain: 0.6, slideTo: 40 });
+  tone(55, t + 0.22, 0.2, { type: 'sine', gain: 0.45, slideTo: 38 });
+}
+
+// Dun-dun-DUN: the front page has landed.
+export function sting() {
+  if (!ready()) return;
+  const t = now();
+  [[293.66, 0, 0.2], [277.18, 0.25, 0.2], [207.65, 0.5, 1.1]].forEach(([f, at, dur]) => {
+    tone(f, t + at, dur, { type: 'sawtooth', gain: 0.1, attack: 0.02 });
+    tone(f / 2, t + at, dur, { type: 'square', gain: 0.06, attack: 0.02 });
+  });
+  noise(t + 0.5, 0.9, { gain: 0.06, freq: 300, type: 'lowpass' });
+}
+
 // The "heat is on" moment: a riser into two brass stabs.
 export function heatSting() {
   if (!ctx || mode !== 'all') return;

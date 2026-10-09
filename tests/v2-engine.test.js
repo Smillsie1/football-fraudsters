@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SEASONS, WEEKS, SEASON_SECONDS, MAX_CHARGES, DEAL_TERM, CARDS, METHODS } from '../v2/js/data.js';
+import { SEASONS, WEEKS, SEASON_SECONDS, MAX_CHARGES, DEAL_TERM, CARDS, METHODS, CONTACTS, STING } from '../v2/js/data.js';
 import {
   newRun, tick, collect, shred, topUp, choose, nextSeason, mulberry32, dailySeed,
   bookedRevenue, strength, strengthFromSpend, methodHeatMult, moneyRank, leagueTable,
   ffpHeadroom, topUpAmount, stars, shareText, division,
+  enterMeeting, meetingSay, leaveMeeting, wiredChance, contactById, exposePenalty,
 } from '../v2/js/engine.js';
 
 const fresh = (seed = 42) => {
@@ -238,5 +239,151 @@ test('a full run always terminates with a valid ending and share text', () => {
     assert.ok(['complete', 'expelled', 'revolt'].includes(s.over.reason));
     if (s.over.reason === 'complete') assert.equal(s.history.length, SEASONS);
     assert.match(shareText(s), /Sportswash/);
+  }
+});
+
+// --- the back room ---------------------------------------------------------------
+const addDoor = (s) => {
+  const b = { id: s.nextId++, type: 'door', x: 0.5, y: 0.5, life: 7, maxLife: 7 };
+  s.bubbles.push(b);
+  return b;
+};
+const meet = (wired, seed = 3) => {
+  const { s, rng } = fresh(seed);
+  enterMeeting(s, addDoor(s).id, rng);
+  s.meeting.wired = wired;
+  return { s, rng };
+};
+// Run the clock until the exposé card appears (or give up).
+const untilExpose = (s, rng) => {
+  for (let t = 0; t < 30 && !(s.phase === 'card' && s.card?.expose); t += 0.05) {
+    s.cardTimer = 99;
+    if (s.phase === 'card' && !s.card.expose) choose(s, 'left', rng);
+    else tick(s, 0.05, rng);
+  }
+};
+
+test('a back-room door appears once each season', () => {
+  const { s, rng } = fresh();
+  runFor(s, SEASON_SECONDS - 1, rng);
+  const doorsSeen = s.doorShown;
+  assert.equal(doorsSeen, true);
+  assert.ok(s.doorWeek >= 6 && s.doorWeek < 30);
+});
+
+test('entering the back room pauses the season', () => {
+  const { s, rng } = fresh();
+  enterMeeting(s, addDoor(s).id, rng);
+  assert.equal(s.phase, 'meeting');
+  const week = s.week;
+  tick(s, 5, rng);
+  assert.equal(s.week, week);
+  assert.equal(s.meeting.lines.length, 1);
+});
+
+test('reckless lines pay more and put more on tape', () => {
+  const a = meet(false); const b = meet(false);
+  meetingSay(a.s, 0, a.rng);
+  meetingSay(b.s, 2, b.rng);
+  assert.equal(a.s.meeting.tape, 0);
+  assert.ok(b.s.meeting.tape >= 2);
+});
+
+test('favours land even if you walk out early', () => {
+  const { s, rng } = meet(false);
+  const c = contactById(s.meeting.contactId);
+  const fx = c.rounds[0].options[2].fx;
+  const before = { spend: s.cardSpend, case: s.caseFile, pts: s.pts, deals: s.deals.length, oneoff: s.oneoff };
+  meetingSay(s, 2, rng);
+  const res = leaveMeeting(s, rng);
+  assert.equal(res.result, 'clean');
+  assert.equal(s.phase, 'play');
+  const changed = s.cardSpend !== before.spend || s.pts !== before.pts || s.deals.length !== before.deals || s.oneoff !== before.oneoff || Object.keys(fx).length === 0;
+  assert.ok(changed);
+});
+
+test('a clean room never leads to a story', () => {
+  const { s, rng } = meet(false);
+  for (let i = 0; i < 3; i++) meetingSay(s, 2, rng);
+  assert.equal(s.phase, 'play');
+  assert.equal(s.expose, null);
+});
+
+test('a wired room with nothing said: the reporter gets nothing', () => {
+  const { s, rng } = meet(true);
+  for (let i = 0; i < 3; i++) meetingSay(s, 0, rng);
+  assert.equal(s.expose, null);
+  assert.match(s.news[0].text, /nothing usable/);
+});
+
+test('a wired room with reckless talk becomes a front page weeks later', () => {
+  const { s, rng } = meet(true);
+  meetingSay(s, 2, rng);
+  const res = leaveMeeting(s, rng);
+  assert.equal(res.result, 'stung');
+  assert.ok(s.expose.weeks >= STING.weeks[0] && s.expose.weeks <= STING.weeks[1]);
+  const week = s.week;
+  untilExpose(s, rng);
+  assert.ok(s.card?.expose, 'exposé card should appear');
+  assert.ok(s.week - week >= STING.weeks[0]);
+  assert.match(s.card.text, /caught on camera/);
+});
+
+test('riding out an exposé applies the penalty and makes papers keener', () => {
+  const { s, rng } = meet(true);
+  meetingSay(s, 2, rng);
+  leaveMeeting(s, rng);
+  const sev = s.expose.severity;
+  untilExpose(s, rng);
+  s.heat = 0; s.caseFile = 0; s.fans = 80;
+  const contact = CONTACTS[0];
+  const before = wiredChance(s, contact);
+  choose(s, 'right', rng);
+  const p = exposePenalty(sev);
+  assert.equal(s.caseFile, p.case);
+  assert.equal(s.fans, 80 + p.fans);
+  assert.equal(s.stings, 1);
+  assert.ok(wiredChance(s, contact) > before);
+});
+
+test('a refused injunction makes the story bigger', () => {
+  const { s, rng } = meet(true);
+  meetingSay(s, 2, rng);
+  leaveMeeting(s, rng);
+  const sev = s.expose.severity;
+  untilExpose(s, rng);
+  s.heat = 0; s.caseFile = 0;
+  choose(s, 'left', () => 0.99); // the injunction roll fails
+  assert.equal(s.caseFile, exposePenalty(sev + 1).case);
+});
+
+test('a granted injunction kills the story', () => {
+  const { s, rng } = meet(true);
+  meetingSay(s, 2, rng);
+  leaveMeeting(s, rng);
+  untilExpose(s, rng);
+  s.caseFile = 0;
+  choose(s, 'left', () => 0.01);
+  assert.equal(s.caseFile, 0);
+  assert.equal(s.stings, 0);
+});
+
+test('hotter clubs are likelier to be stung', () => {
+  const { s } = fresh();
+  const c = CONTACTS[0];
+  const cold = wiredChance(s, c);
+  s.heat = 100;
+  assert.ok(wiredChance(s, c) > cold);
+  assert.ok(cold < 0.15, 'stings should be a small chance when cold');
+});
+
+test('every contact has three rounds of safe, bold and reckless options', () => {
+  for (const c of CONTACTS) {
+    assert.equal(c.rounds.length, 3, c.id);
+    for (const r of c.rounds) {
+      assert.deepEqual(r.options.map((o) => o.tone), ['safe', 'bold', 'reckless'], c.id);
+      assert.equal(r.options[0].tape, 0);
+      assert.ok(r.options[2].tape > r.options[1].tape);
+    }
   }
 });

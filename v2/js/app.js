@@ -1,9 +1,10 @@
 // v2 UI layer. Security rule: never use innerHTML. All text goes through textContent via h().
-import { SEASONS, WEEKS, MAX_CHARGES, TAUNTS, INFLATION } from './data.js';
+import { SEASONS, WEEKS, MAX_CHARGES, TAUNTS, INFLATION, NEWSPAPER } from './data.js';
 import {
   newRun, tick, collect, shred, topUp, choose, nextSeason, mulberry32, dailySeed, formatMoney,
   division, bookedRevenue, strength, moneyLeague, moneyRank, leagueTable, leaguePosition,
   ffpHeadroom, topUpAmount, methodById, stars, bestRank, endingTitle, shareText, fightOdds,
+  enterMeeting, meetingSay, leaveMeeting, contactById,
 } from './engine.js';
 import * as sound from './audio.js';
 
@@ -190,7 +191,7 @@ function stopLoop() {
 function frame(now) {
   const dt = Math.min(0.1, (now - lastT) / 1000) * speed;
   lastT = now;
-  if (!paused && run.phase === 'play') {
+  if (!paused && run.phase === 'play' && !ui.overlay) {
     for (let left = dt; left > 1e-6; left -= STEP) tick(run, Math.min(STEP, left), rng);
   }
   sync();
@@ -198,6 +199,7 @@ function frame(now) {
   sound.duck(paused || run.phase !== 'play');
   if (run.leaksLanded > leaksHeard) { leaksHeard = run.leaksLanded; sound.leak(); }
   if (run.phase === 'card') { showCard(); }
+  if (run.phase === 'meeting') { showMeeting(); }
   if (run.phase === 'seasonEnd') { stopLoop(); screenSeasonEnd(); return; }
   if (run.phase === 'over') { stopLoop(); screenEnd(); return; }
   rafId = requestAnimationFrame(frame);
@@ -234,13 +236,13 @@ function syncBubbles() {
     live.add(b.id);
     let el = ui.els.get(b.id);
     if (!el) {
-      el = b.type === 'deal' ? dealEl(b) : leakEl(b);
+      el = b.type === 'deal' ? dealEl(b) : b.type === 'door' ? doorEl(b) : leakEl(b);
       ui.els.set(b.id, el);
       ui.arena.append(el);
     }
     el.style.left = `${b.x * 100}%`;
     el.style.top = `${b.y * 100}%`;
-    if (b.type === 'deal') el.style.setProperty('--life', String(Math.max(0, b.life / b.maxLife)));
+    if (b.type !== 'leak') el.style.setProperty('--life', String(Math.max(0, b.life / b.maxLife)));
   }
   for (const [id, el] of ui.els) {
     if (!live.has(id)) { el.remove(); ui.els.delete(id); }
@@ -256,6 +258,18 @@ function dealEl(b) {
     title: `${m.name} (${infl.label})`,
     onclick: () => onCollect(b.id),
   }, h('span', { class: 'b-emoji', 'aria-hidden': 'true' }, m.emoji), h('span', { class: 'b-value' }, formatMoney(b.value)));
+}
+
+function doorEl(b) {
+  return h('button', {
+    type: 'button', class: 'bubble door', 'aria-label': 'A private meeting: enter the back room',
+    title: 'A private meeting...',
+    onclick: () => onDoor(b.id),
+  }, h('span', { class: 'b-emoji', 'aria-hidden': 'true' }, '\u{1F6AA}'), h('span', { class: 'b-value' }, 'Back room'));
+}
+
+function onDoor(id) {
+  if (enterMeeting(run, id, rng)) { sound.door(); sync(); }
 }
 
 function leakEl(b) {
@@ -329,7 +343,7 @@ function setSpeed(n) {
 }
 
 // --- cards --------------------------------------------------------------------
-const FX_ICONS = { heat: '\u{1F525}', case: '\u{1F4C1}', fans: '❤️', spend: '⚽', oneoff: '\u{1F4B0}', points: '\u{1F3C6}' };
+const FX_ICONS = { deal: '\u{1F91D}', heat: '\u{1F525}', case: '\u{1F4C1}', fans: '❤️', spend: '⚽', oneoff: '\u{1F4B0}', points: '\u{1F3C6}' };
 
 // Reigns-style: show which meters an answer touches, never by how much.
 function fxHints(opt) {
@@ -345,7 +359,9 @@ function showCard() {
   const c = run.card;
   const label = (side) => {
     const o = c[side];
-    return c.hearing && side === 'right' ? `${o.label} (${Math.round(fightOdds(run) * 100)}% chance)` : o.label;
+    if (c.hearing && side === 'right') return `${o.label} (${Math.round(fightOdds(run) * 100)}% chance)`;
+    if (c.expose && side === 'left') return `${o.label} (${Math.round(o.odds * 100)}% chance)`;
+    return o.label;
   };
   const answer = (side) => {
     if (!ui.overlay) return;
@@ -358,7 +374,7 @@ function showCard() {
     lastT = performance.now();
     sync();
   };
-  const card = h('div', { class: `swipe-card${c.hearing ? ' hearing' : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'card-text' },
+  const card = h('div', { class: `swipe-card${c.hearing ? ' hearing' : ''}${c.expose ? ' expose' : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'card-text' },
     h('div', { class: 'who', 'aria-hidden': 'true' }, c.who),
     h('p', { class: 'kicker' }, c.speaker),
     h('p', { class: 'card-text', id: 'card-text' }, c.text),
@@ -370,8 +386,74 @@ function showCard() {
   ui.overlay = h('div', { class: 'overlay' }, card);
   ui.overlay.answer = answer;
   document.body.append(ui.overlay);
-  if (c.hearing) sound.gavel(); else sound.cardIn();
+  if (c.hearing) sound.gavel(); else if (c.expose) sound.sting(); else sound.cardIn();
   card.querySelector('.opt.left').focus({ preventScroll: true });
+}
+
+// --- the back room --------------------------------------------------------------
+const TONE_LABEL = { safe: 'Play it safe', bold: 'Bold', reckless: 'Reckless' };
+
+function showMeeting() {
+  if (ui.overlay) return;
+  ui.overlay = h('div', { class: 'overlay room-overlay' });
+  document.body.append(ui.overlay);
+  renderMeeting();
+}
+
+function closeOverlay() {
+  if (!ui.overlay) return;
+  ui.overlay.remove();
+  ui.overlay = null;
+  lastT = performance.now();
+  sync();
+}
+
+function renderMeeting() {
+  const m = run.meeting;
+  const contact = contactById(m.contactId);
+  const round = contact.rounds[m.round];
+  const say = (i) => {
+    const opt = round.options[i];
+    const res = meetingSay(run, i, rng);
+    if (opt.tone === 'reckless') sound.heartbeat(); else sound.click();
+    if (res?.done) meetingOver(res.result); else renderMeeting();
+  };
+  const room = h('div', { class: 'room', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'room-prompt' },
+    h('p', { class: 'kicker' }, '\u{1F6AA} The Back Room \u00B7 ', `Round ${m.round + 1} of ${contact.rounds.length}`),
+    h('div', { class: 'room-head' },
+      h('span', { class: 'who', 'aria-hidden': 'true' }, contact.who),
+      h('div', {}, h('strong', {}, contact.name), h('p', { class: 'muted small' }, contact.intro))),
+    h('ul', { class: 'room-notes', 'aria-label': 'What you notice' },
+      m.lines.map((line) => h('li', {}, line))),
+    h('p', { class: 'room-prompt', id: 'room-prompt' }, `\u201C${round.prompt}\u201D`),
+    h('div', { class: 'room-options' },
+      round.options.map((o, i) => h('button', { type: 'button', class: `say ${o.tone}`, onclick: () => say(i) },
+        h('span', { class: 'tone' }, TONE_LABEL[o.tone]),
+        h('span', {}, `\u201C${o.label}\u201D`),
+        fxHints(o)))),
+    h('div', { class: 'room-foot' },
+      h('span', { class: 'tape', title: 'How damning this would be if the room is wired' },
+        '\u{1F399}\uFE0F On tape (if wired): ', m.tape ? '\u{1F534}'.repeat(m.tape) : 'nothing yet'),
+      h('button', { type: 'button', class: 'ghost', onclick: () => { sound.door(); meetingOver(leaveMeeting(run, rng).result); } }, 'Walk out')),
+    h('p', { class: 'muted small' }, 'Undercover newspaper stings are a matter of public record: in 2016 one ended an England manager\u2019s tenure after a single match.'));
+  ui.overlay.replaceChildren(room);
+  room.querySelector('.say').focus({ preventScroll: true });
+}
+
+function meetingOver(result) {
+  const text = {
+    stung: [`\u{1F4F1} That evening your phone buzzes. ${NEWSPAPER} is \u201Cseeking comment\u201D.`, 'The story lands in a few weeks. Start praying.'],
+    dodged: [`\u{1F4F8} The \u201Ccontact\u201D was a ${NEWSPAPER} reporter.`, 'You said nothing usable. Your caution saved you.'],
+    clean: ['\u{1F91D} Meeting over. Nobody saw a thing.', 'Probably.'],
+  }[result];
+  if (result === 'stung') sound.sting(); else if (result === 'dodged') sound.fanfare(); else sound.coin();
+  const room = h('div', { class: `room result-${result}`, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'room-result' },
+    h('p', { class: 'kicker' }, '\u{1F6AA} The Back Room'),
+    h('p', { class: 'room-prompt', id: 'room-result' }, text[0]),
+    h('p', {}, text[1]),
+    h('button', { type: 'button', class: 'primary', onclick: closeOverlay }, 'Back to the season'));
+  ui.overlay.replaceChildren(room);
+  room.querySelector('button').focus({ preventScroll: true });
 }
 
 function attachSwipe(card, answer) {
@@ -490,9 +572,11 @@ showSoundMode();
 
 document.addEventListener('keydown', (e) => {
   if (!run || e.target instanceof HTMLInputElement) return;
-  if (ui?.overlay && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+  if (ui?.overlay?.answer && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
     e.preventDefault();
     ui.overlay.answer(e.key === 'ArrowLeft' ? 'left' : 'right');
+  } else if (ui?.overlay) {
+    // keys belong to the dialog while one is open
   } else if (e.key === ' ' && rafId) {
     e.preventDefault();
     togglePause();
