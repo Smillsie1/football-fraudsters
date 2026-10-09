@@ -9,7 +9,7 @@
 import {
   SEASONS, SEASON_SECONDS, WEEKS, SQUAD_SHARE, DEAL_TERM, MAX_CHARGES, DIVISIONS, START,
   METHODS, INFLATION, MONEY_LEAGUE, RIVAL_GROWTH, TOWNS, SUFFIXES, CARDS,
-  CONTACTS, TELLS, SMALL_TALK, STING, NEWSPAPER,
+  CONTACTS, TELLS, SMALL_TALK, STING, NEWSPAPER, LEGENDS, FUNNELS,
 } from './data.js';
 
 export const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
@@ -21,6 +21,8 @@ const sig = (x) => 1 / (1 + Math.exp(-x));
 const DEAL_LIFE = 5.5;       // seconds a deal bubble stays on screen
 const LEAK_CASE = 6;         // case file per un-shredded leak (x scrutiny)
 const CARD_GAP = [18, 28];   // seconds between choice cards
+const TRANSFER_LIFE = 6;     // seconds a star transfer stays on offer
+const TRANSFER_GAP = [16, 30]; // seconds between star transfers
 const DOOR_LIFE = 7;         // seconds the back-room door stays open
 const HEAT_DECAY = 1.5;      // heat lost per second
 const COLD_CASE = 0.15;      // case file lost per second while heat is low
@@ -90,7 +92,7 @@ export function newRun({ clubName = 'Sportswash FC', seed = 1 } = {}, rng = Math
     dealTimer: 1.5,
     leakTimer: 1,
     cardTimer: 12,
-    phase: 'play',       // play | card | meeting | seasonEnd | over
+    phase: 'play',       // play | card | meeting | transfer | seasonEnd | over
     card: null,
     lastSeason: null,
     history: [],
@@ -102,6 +104,9 @@ export function newRun({ clubName = 'Sportswash FC', seed = 1 } = {}, rng = Math
     meeting: null,       // the back-room meeting in progress
     expose: null,        // a sting awaiting publication: { weeks, severity, quote }
     stings: 0,           // stings published so far
+    transferTimer: 14,
+    transfer: null,      // the star transfer being negotiated
+    signed: [],          // legend ids signed this run
     over: null,          // { reason: 'complete' | 'expelled' | 'revolt' }
   };
   return s;
@@ -198,6 +203,12 @@ export function tick(s, dt, rng = Math.random) {
 
   s.leakTimer -= dt * (0.03 + 0.25 * s.heat / 100);
   if (s.leakTimer <= 0) { spawnLeak(s, rng); s.leakTimer = 0.5 + rng(); }
+
+  s.transferTimer -= dt;
+  if (s.transferTimer <= 0) {
+    spawnTransfer(s, rng);
+    s.transferTimer = TRANSFER_GAP[0] + (TRANSFER_GAP[1] - TRANSFER_GAP[0]) * rng();
+  }
 
   if (!s.doorShown && s.week >= s.doorWeek) {
     s.doorShown = true;
@@ -334,6 +345,72 @@ export function choose(s, side, rng = Math.random) {
   s.phase = 'play';
   if (s.fans <= 0) finish(s, 'revolt');
   return outcome;
+}
+
+// --- the transfer market ------------------------------------------------------------
+// A legend is on offer: a cheap public fee, and a much bigger real price. The gap
+// has to be paid somehow, and every way of paying it has a cost.
+export const legendById = (id) => LEGENDS.find((l) => l.id === id);
+export const funnelById = (id) => FUNNELS.find((f) => f.id === id);
+
+function spawnTransfer(s, rng) {
+  const offered = new Set(s.bubbles.filter((b) => b.type === 'transfer').map((b) => b.legendId));
+  const pool = LEGENDS.filter((l) => !s.signed.includes(l.id) && !offered.has(l.id));
+  if (!pool.length) return;
+  const l = pickFrom(pool, rng);
+  s.bubbles.push({ id: s.nextId++, type: 'transfer', legendId: l.id, x: 0.1 + 0.65 * rng(), y: 0.15 + 0.7 * rng(), life: TRANSFER_LIFE, maxLife: TRANSFER_LIFE });
+}
+
+export function openTransfer(s, id, rng = Math.random) {
+  const b = s.bubbles.find((x) => x.id === id && x.type === 'transfer');
+  if (!b || s.phase !== 'play') return null;
+  s.bubbles = s.bubbles.filter((x) => x !== b);
+  const l = legendById(b.legendId);
+  const sc = division(s).scale;
+  const units = (l.rating - 70) / 5; // 2.8 to 5
+  const publicFee = units * sc * 0.4;
+  const realPrice = units * sc * (1.4 + 0.8 * rng());
+  s.transfer = { legendId: l.id, units, publicFee, realPrice, gap: realPrice - publicFee };
+  s.phase = 'transfer';
+  return s.transfer;
+}
+
+// Heat for paying this gap through this funnel: bigger gaps and reused tricks run hotter.
+export function funnelHeat(s, funnelId) {
+  const f = funnelById(funnelId);
+  if (!f.heat || !s.transfer) return 0;
+  const sc = division(s).scale;
+  return f.heat * Math.sqrt(s.transfer.gap / (2 * sc)) * methodHeatMult(s, f.uses) * division(s).scrutiny;
+}
+
+export function signTransfer(s, funnelId, rng = Math.random) {
+  const t = s.transfer;
+  const f = funnelById(funnelId);
+  if (s.phase !== 'transfer' || !t || !f) return null;
+  const l = legendById(t.legendId);
+  const heat = funnelHeat(s, funnelId);
+  s.heat = clamp(s.heat + heat, 0, 100);
+  if (f.uses) s.uses[f.uses] = (s.uses[f.uses] || 0) + 1;
+  if (f.id === 'honest') s.topUps += t.gap;
+  if (f.id === 'bermuda') spawnLeak(s, rng);
+  let talked = false;
+  if (f.risk && rng() < f.risk.p) {
+    talked = true;
+    s.caseFile = clamp(s.caseFile + f.risk.case, 0, 100);
+    addNews(s, f.risk.news, 'bad');
+  }
+  s.cardSpend += t.units * division(s).scale * 2;
+  s.signed.push(l.id);
+  addNews(s, `${l.name} signs for a "bargain" ${formatMoney(t.publicFee)}.`);
+  s.transfer = null;
+  s.phase = 'play';
+  return { legend: l, heat, talked };
+}
+
+export function passTransfer(s) {
+  if (s.phase !== 'transfer') return;
+  s.transfer = null;
+  s.phase = 'play';
 }
 
 // --- the back room ------------------------------------------------------------------

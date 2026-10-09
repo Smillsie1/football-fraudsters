@@ -253,3 +253,49 @@ export const CONTACTS = [
         ] },
     ] },
 ];
+
+// --- The transfer market: star signings with a hidden price -------------------
+// Legends of days gone by, names lightly altered: affectionate parodies of
+// players in their prime. The players themselves do nothing wrong in this game;
+// the dodgy part is entirely how you fund the deal.
+// rating drives how much stronger the squad gets.
+export const LEGENDS = [
+  { id: 'pele', name: 'Pelè', pos: 'Forward', rating: 95 },
+  { id: 'maradona', name: 'Diego Marodona', pos: 'Forward', rating: 95 },
+  { id: 'zidane', name: 'Zinedone Zidame', pos: 'Midfielder', rating: 94 },
+  { id: 'cruyff', name: 'Johan Kroyff', pos: 'Forward', rating: 94 },
+  { id: 'beckenbauer', name: 'Franz Breckenbauer', pos: 'Defender', rating: 93 },
+  { id: 'distefano', name: 'Alfredo Di Stefanno', pos: 'Forward', rating: 93 },
+  { id: 'puskas', name: 'Ferenc Pushcash', pos: 'Forward', rating: 92 },
+  { id: 'eusebio', name: 'Eusebiu', pos: 'Forward', rating: 91 },
+  { id: 'yashin', name: 'Lev Yashkin', pos: 'Goalkeeper', rating: 91 },
+  { id: 'best', name: 'Georgie Bestt', pos: 'Winger', rating: 91 },
+  { id: 'maldini', name: 'Paolo Mandolini', pos: 'Defender', rating: 91 },
+  { id: 'vanbasten', name: 'Marco van Basteen', pos: 'Forward', rating: 90 },
+  { id: 'charlton', name: 'Bobby Charlston', pos: 'Midfielder', rating: 90 },
+  { id: 'moore', name: 'Bobby Moor', pos: 'Defender', rating: 90 },
+  { id: 'muller', name: 'Gerd Mueler', pos: 'Forward', rating: 90 },
+  { id: 'garrincha', name: 'Garrincash', pos: 'Winger', rating: 89 },
+  { id: 'banks', name: 'Gordon Bonds', pos: 'Goalkeeper', rating: 89 },
+  { id: 'henry', name: 'Thierry Hendry', pos: 'Forward', rating: 89 },
+  { id: 'baggio', name: 'Roberto Baggie-o', pos: 'Forward', rating: 88 },
+  { id: 'shilton', name: 'Peter Shiltern', pos: 'Goalkeeper', rating: 88 },
+  { id: 'gullit', name: 'Rudd Gullet', pos: 'Midfielder', rating: 88 },
+  { id: 'dalglish', name: 'Kenny Dalgleash', pos: 'Forward', rating: 87 },
+  { id: 'matthews', name: 'Stanley Mathers', pos: 'Winger', rating: 87 },
+  { id: 'zoff', name: 'Dino Zoft', pos: 'Goalkeeper', rating: 86 },
+  { id: 'gascoigne', name: 'Paul Gasgoine', pos: 'Midfielder', rating: 86 },
+  { id: 'lineker', name: 'Gary Linekar', pos: 'Forward', rating: 85 },
+  { id: 'keegan', name: 'Kevin Keeghan', pos: 'Forward', rating: 85 },
+  { id: 'rush', name: 'Ian Rash', pos: 'Forward', rating: 84 },
+];
+
+// How to pay the gap between the public fee and the real asking price.
+// heat: base heat for a typical gap; uses: which method the regulator learns.
+export const FUNNELS = [
+  { id: 'honest', name: 'Pay it all, honestly', desc: 'Owner equity. No heat at all, but it counts against the loss limit.', heat: 0 },
+  { id: 'bermuda', name: 'Image rights via Bermuda', desc: 'Never touches the accounts. Hot, and a document will leak.', heat: 9, uses: 'image' },
+  { id: 'sister', name: 'Sister-club "loan fee"', desc: 'Routed through your Belgian sister club.', heat: 6, uses: 'sister' },
+  { id: 'agent', name: 'Agent "consultancy"', desc: 'Paid to the agent\'s Jersey company. Cooler, but agents talk.', heat: 4, uses: 'agent',
+    risk: { p: 0.3, case: 12, news: 'The agent\'s ex-partner sells the "consultancy" story to the papers.' } },
+];

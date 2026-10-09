@@ -3,7 +3,7 @@
 // Design target: careful play can earn stars; clicking everything usually ends
 // in expulsion; doing nothing never tops the Money League.
 import { newRun, tick, collect, shred, choose, nextSeason, topUp, ffpHeadroom, topUpAmount, stars, bestRank, mulberry32, methodById, methodHeatMult, division,
-  enterMeeting, meetingSay, leaveMeeting } from '../v2/js/engine.js';
+  enterMeeting, meetingSay, leaveMeeting, openTransfer, signTransfer, passTransfer, funnelHeat } from '../v2/js/engine.js';
 import { TELLS } from '../v2/js/data.js';
 
 const DT = 0.1;
@@ -26,7 +26,7 @@ const BOTS = {
   // shows up, then walks out.
   schemer: {
     take: (s, b) => s.heat + expectedHeat(s, b) < 55,
-    hearing: 'left', topUp: true, smartCards: true, meet: 'read',
+    hearing: 'left', topUp: true, smartCards: true, meet: 'read', transfers: true,
   },
   // Skilled, but says the most reckless thing in every meeting.
   reckless: {
@@ -34,6 +34,14 @@ const BOTS = {
     hearing: 'left', topUp: true, smartCards: true, meet: 'reckless',
   },
 };
+
+// Sign a legend if cool enough: honestly when the loss limit allows, else the coolest funnel.
+function transferMove(s, rng) {
+  if (s.heat > 40) return passTransfer(s);
+  if (ffpHeadroom(s) >= s.transfer.gap) return signTransfer(s, 'honest', rng);
+  const best = ['sister', 'agent'].sort((a, b) => funnelHeat(s, a) - funnelHeat(s, b))[0];
+  return signTransfer(s, best, rng);
+}
 
 function meetingMove(s, bot, rng) {
   const m = s.meeting;
@@ -60,6 +68,7 @@ function play(bot, seed) {
       for (const b of [...s.bubbles]) {
         if (b.type === 'deal' && b.maxLife - b.life > REACT && bot.take(s, b)) collect(s, b.id, rng);
         if (b.type === 'door' && bot.meet && s.phase === 'play') enterMeeting(s, b.id, rng);
+        if (b.type === 'transfer' && bot.transfers && s.phase === 'play' && b.maxLife - b.life > REACT) openTransfer(s, b.id, rng);
         if (b.type === 'leak' && b.x > 0.3 && !missed.has(b.id)) {
           if (rng() < SHRED_P) shred(s, b.id); else missed.add(b.id);
         }
@@ -71,7 +80,8 @@ function play(bot, seed) {
         : bot.smartCards ? (risk(c.left) <= risk(c.right) ? 'left' : 'right')
         : rng() < 0.5 ? 'left' : 'right';
       choose(s, side, rng);
-    } else if (s.phase === 'meeting') meetingMove(s, bot, rng);
+    } else if (s.phase === 'transfer') transferMove(s, rng);
+    else if (s.phase === 'meeting') meetingMove(s, bot, rng);
     else if (s.phase === 'seasonEnd') nextSeason(s);
   }
   return s;

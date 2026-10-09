@@ -192,6 +192,27 @@ export function heartbeat() {
   tone(55, t + 0.22, 0.2, { type: 'sine', gain: 0.45, slideTo: 38 });
 }
 
+// A crowd roar for a big signing: swelling filtered noise under a bright chord.
+export function cheer() {
+  if (!ready()) return;
+  const t = now();
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuf;
+  src.loop = true;
+  const f = ctx.createBiquadFilter();
+  f.type = 'bandpass';
+  f.frequency.value = 900;
+  f.Q.value = 0.6;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.35, t + 0.35);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 1.8);
+  src.connect(f).connect(g).connect(sfxBus);
+  src.start(t);
+  src.stop(t + 1.85);
+  [523.25, 659.25, 783.99].forEach((fr) => tone(fr, t + 0.1, 0.5, { type: 'triangle', gain: 0.07, attack: 0.03 }));
+}
+
 // Dun-dun-DUN: the front page has landed.
 export function sting() {
   if (!ready()) return;

@@ -1,10 +1,11 @@
 // v2 UI layer. Security rule: never use innerHTML. All text goes through textContent via h().
-import { SEASONS, WEEKS, MAX_CHARGES, TAUNTS, INFLATION, NEWSPAPER } from './data.js';
+import { SEASONS, WEEKS, MAX_CHARGES, TAUNTS, INFLATION, NEWSPAPER, FUNNELS } from './data.js';
 import {
   newRun, tick, collect, shred, topUp, choose, nextSeason, mulberry32, dailySeed, formatMoney,
   division, bookedRevenue, strength, moneyLeague, moneyRank, leagueTable, leaguePosition,
   ffpHeadroom, topUpAmount, methodById, stars, bestRank, endingTitle, shareText, fightOdds,
   enterMeeting, meetingSay, leaveMeeting, contactById,
+  openTransfer, signTransfer, passTransfer, funnelHeat, legendById,
 } from './engine.js';
 import * as sound from './audio.js';
 
@@ -138,6 +139,8 @@ function screenGame() {
     arena: h('div', { class: 'arena', role: 'group', 'aria-label': 'The pitch: deals and leaks appear here' },
       h('div', { class: 'journalist', 'aria-hidden': 'true' }, '\u{1F575}️', h('span', {}, 'Press'))),
     news: h('ol', { class: 'news', 'aria-live': 'polite' }),
+    signed: h('ul', { class: 'signed' }),
+    signedKey: '',
     table: h('tbody'),
     els: new Map(),
     newsKey: '',
@@ -166,6 +169,7 @@ function screenGame() {
           ui.topUpBtn)),
       h('aside', {},
         h('div', { class: 'card' }, h('h3', { class: 'side-h' }, 'Headlines'), ui.news),
+        h('div', { class: 'card' }, h('h3', { class: 'side-h' }, '\u{1F31F} Your legends'), ui.signed),
         h('div', { class: 'card' },
           h('table', { class: 'mini' }, h('caption', {}, 'League table'), ui.table)))),
   );
@@ -200,6 +204,7 @@ function frame(now) {
   if (run.leaksLanded > leaksHeard) { leaksHeard = run.leaksLanded; sound.leak(); }
   if (run.phase === 'card') { showCard(); }
   if (run.phase === 'meeting') { showMeeting(); }
+  if (run.phase === 'transfer') { showTransfer(); }
   if (run.phase === 'seasonEnd') { stopLoop(); screenSeasonEnd(); return; }
   if (run.phase === 'over') { stopLoop(); screenEnd(); return; }
   rafId = requestAnimationFrame(frame);
@@ -227,6 +232,7 @@ function sync() {
   ui.pauseBtn.textContent = paused ? '▶ Play' : '⏸ Pause';
   syncBubbles();
   syncNews();
+  syncSigned();
   if (--ui.tableTick <= 0) { syncTable(); ui.tableTick = 15; }
 }
 
@@ -236,7 +242,7 @@ function syncBubbles() {
     live.add(b.id);
     let el = ui.els.get(b.id);
     if (!el) {
-      el = b.type === 'deal' ? dealEl(b) : b.type === 'door' ? doorEl(b) : leakEl(b);
+      el = b.type === 'deal' ? dealEl(b) : b.type === 'door' ? doorEl(b) : b.type === 'transfer' ? starEl(b) : leakEl(b);
       ui.els.set(b.id, el);
       ui.arena.append(el);
     }
@@ -258,6 +264,19 @@ function dealEl(b) {
     title: `${m.name} (${infl.label})`,
     onclick: () => onCollect(b.id),
   }, h('span', { class: 'b-emoji', 'aria-hidden': 'true' }, m.emoji), h('span', { class: 'b-value' }, formatMoney(b.value)));
+}
+
+function starEl(b) {
+  const l = legendById(b.legendId);
+  return h('button', {
+    type: 'button', class: 'bubble star', 'aria-label': `Transfer target: ${l.name}, ${l.pos}`,
+    title: `${l.name} is available...`,
+    onclick: () => onStar(b.id),
+  }, h('span', { class: 'b-emoji', 'aria-hidden': 'true' }, '\u{1F31F}'), h('span', { class: 'b-value' }, l.name.split(' ').pop()));
+}
+
+function onStar(id) {
+  if (openTransfer(run, id, rng)) { sound.cardIn(); sync(); }
 }
 
 function doorEl(b) {
@@ -316,6 +335,15 @@ function syncNews() {
   ui.newsKey = key;
   ui.news.replaceChildren(...run.news.slice(0, 5).map((n) =>
     h('li', { class: n.tone }, h('span', { class: 'muted small' }, `S${n.season} W${n.week}`), ' ', n.text)));
+}
+
+function syncSigned() {
+  const key = run.signed.join(',');
+  if (key === ui.signedKey) return;
+  ui.signedKey = key;
+  ui.signed.replaceChildren(...(run.signed.length
+    ? run.signed.map((id) => { const l = legendById(id); return h('li', {}, h('strong', {}, l.name), ` \u00B7 ${l.pos}`); })
+    : [h('li', { class: 'muted' }, 'Tap a \u{1F31F} to sign one.')]));
 }
 
 function syncTable() {
@@ -388,6 +416,43 @@ function showCard() {
   document.body.append(ui.overlay);
   if (c.hearing) sound.gavel(); else if (c.expose) sound.sting(); else sound.cardIn();
   card.querySelector('.opt.left').focus({ preventScroll: true });
+}
+
+// --- the transfer market -----------------------------------------------------------
+function showTransfer() {
+  if (ui.overlay) return;
+  const t = run.transfer;
+  const l = legendById(t.legendId);
+  const sign = (fid) => {
+    const res = signTransfer(run, fid, rng);
+    closeOverlay();
+    if (!res) return;
+    sound.cheer();
+    floatText(0.5, 0.45, `\u{1F31F} ${l.name} signs!${res.heat ? `  \u{1F525}+${Math.round(res.heat)}` : ''}`, res.heat > 15 ? 'hot' : 'cash');
+    if (res.talked) setTimeout(sound.leak, 400);
+  };
+  const headroom = ffpHeadroom(run) - t.gap;
+  const card = h('div', { class: 'swipe-card transfer', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'transfer-name' },
+    h('p', { class: 'kicker' }, '\u{1F31F} Transfer window'),
+    h('p', { class: 'legend-name', id: 'transfer-name' }, l.name),
+    h('p', { class: 'muted' }, `${l.pos} \u00B7 rated ${l.rating} \u00B7 a legend of days gone by, in his prime`),
+    h('dl', { class: 'fees' },
+      h('dt', {}, 'Public fee (what the papers see)'), h('dd', {}, formatMoney(t.publicFee)),
+      h('dt', {}, 'Real asking price'), h('dd', {}, formatMoney(t.realPrice)),
+      h('dt', {}, 'The gap, paid... somehow'), h('dd', { class: 'gap' }, formatMoney(t.gap))),
+    h('div', { class: 'funnels' },
+      FUNNELS.map((f) => {
+        const heat = funnelHeat(run, f.id);
+        const note = f.id === 'honest'
+          ? (headroom < 0 ? `\u26A0\uFE0F Breaches the loss limit by ${formatMoney(-headroom)}` : `Loss-limit headroom after: ${formatMoney(headroom)}`)
+          : `\u{1F525} about +${Math.round(heat)}${f.risk ? ' \u00B7 \u{1F3B2} the agent might talk' : ''}`;
+        return h('button', { type: 'button', class: `funnel${f.id === 'honest' && headroom < 0 ? ' over' : ''}`, onclick: () => sign(f.id) },
+          h('strong', {}, f.name), h('span', { class: 'small muted' }, f.desc), h('span', { class: 'small' }, note));
+      })),
+    h('button', { type: 'button', class: 'ghost full', onclick: () => { passTransfer(run); closeOverlay(); sound.click(); } }, 'Walk away'));
+  ui.overlay = h('div', { class: 'overlay' }, card);
+  document.body.append(ui.overlay);
+  card.querySelector('.funnel').focus({ preventScroll: true });
 }
 
 // --- the back room --------------------------------------------------------------

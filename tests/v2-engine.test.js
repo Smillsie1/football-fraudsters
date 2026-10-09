@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SEASONS, WEEKS, SEASON_SECONDS, MAX_CHARGES, DEAL_TERM, CARDS, METHODS, CONTACTS, STING } from '../v2/js/data.js';
+import { SEASONS, WEEKS, SEASON_SECONDS, MAX_CHARGES, DEAL_TERM, CARDS, METHODS, CONTACTS, STING, LEGENDS, FUNNELS } from '../v2/js/data.js';
 import {
   newRun, tick, collect, shred, topUp, choose, nextSeason, mulberry32, dailySeed,
   bookedRevenue, strength, strengthFromSpend, methodHeatMult, moneyRank, leagueTable,
   ffpHeadroom, topUpAmount, stars, shareText, division,
   enterMeeting, meetingSay, leaveMeeting, wiredChance, contactById, exposePenalty,
+  openTransfer, signTransfer, passTransfer, funnelHeat, squadSpend,
 } from '../v2/js/engine.js';
 
 const fresh = (seed = 42) => {
@@ -386,4 +387,90 @@ test('every contact has three rounds of safe, bold and reckless options', () => 
       assert.ok(r.options[2].tape > r.options[1].tape);
     }
   }
+});
+
+// --- the transfer market -----------------------------------------------------------
+const addStar = (s, legendId = 'shilton') => {
+  const b = { id: s.nextId++, type: 'transfer', legendId, x: 0.5, y: 0.5, life: 6, maxLife: 6 };
+  s.bubbles.push(b);
+  return b;
+};
+const offer = (seed = 5, legendId) => {
+  const { s, rng } = fresh(seed);
+  openTransfer(s, addStar(s, legendId).id, rng);
+  return { s, rng };
+};
+
+test('star transfers pop up during the season', () => {
+  const { s, rng } = fresh();
+  runFor(s, 20, rng);
+  assert.ok(s.bubbles.some((b) => b.type === 'transfer') || s.transferTimer < 30);
+});
+
+test('opening a transfer pauses play; the real price beats the public fee', () => {
+  const { s } = offer();
+  assert.equal(s.phase, 'transfer');
+  assert.ok(s.transfer.realPrice > s.transfer.publicFee * 3);
+  assert.ok(s.transfer.gap > 0);
+});
+
+test('paying honestly adds no heat but uses up FFP headroom', () => {
+  const { s, rng } = offer();
+  const gap = s.transfer.gap;
+  const spend = squadSpend(s);
+  signTransfer(s, 'honest', rng);
+  assert.equal(s.heat, 0);
+  assert.equal(s.topUps, gap);
+  assert.ok(squadSpend(s) > spend);
+  assert.equal(s.phase, 'play');
+});
+
+test('Bermuda image rights are hot and leak a document', () => {
+  const { s, rng } = offer();
+  signTransfer(s, 'bermuda', rng);
+  assert.ok(s.heat > 0);
+  assert.ok(s.bubbles.some((b) => b.type === 'leak'));
+});
+
+test('reusing a funnel makes it hotter', () => {
+  const { s, rng } = offer(5, 'pele');
+  const first = funnelHeat(s, 'sister');
+  signTransfer(s, 'sister', rng);
+  openTransfer(s, addStar(s, 'zidane').id, rng);
+  const ratio = funnelHeat(s, 'sister') / Math.sqrt(s.transfer.gap);
+  passTransfer(s);
+  const fresh2 = offer(5, 'zidane');
+  const ratio0 = funnelHeat(fresh2.s, 'sister') / Math.sqrt(fresh2.s.transfer.gap);
+  assert.ok(first > 0);
+  assert.ok(ratio > ratio0);
+});
+
+test('agents sometimes talk', () => {
+  const talk = offer();
+  signTransfer(talk.s, 'agent', () => 0.01);
+  assert.ok(talk.s.caseFile > 0);
+  const quiet = offer();
+  signTransfer(quiet.s, 'agent', () => 0.99);
+  assert.equal(quiet.s.caseFile, 0);
+});
+
+test('a signed legend is never offered again; walking away costs nothing', () => {
+  const { s, rng } = offer(5, 'pele');
+  signTransfer(s, 'honest', rng);
+  assert.deepEqual(s.signed, ['pele']);
+  for (let i = 0; i < 200; i++) { s.transferTimer = 0; s.cardTimer = 99; tick(s, 0.01, rng); }
+  assert.ok(!s.bubbles.some((b) => b.type === 'transfer' && b.legendId === 'pele'));
+
+  const walk = offer();
+  passTransfer(walk.s);
+  assert.equal(walk.s.phase, 'play');
+  assert.equal(walk.s.heat, 0);
+  assert.equal(walk.s.signed.length, 0);
+});
+
+test('every legend and funnel is well formed', () => {
+  const ids = new Set(LEGENDS.map((l) => l.id));
+  assert.equal(ids.size, LEGENDS.length);
+  for (const l of LEGENDS) assert.ok(l.rating > 70 && l.rating <= 99, l.id);
+  assert.ok(FUNNELS.some((f) => f.id === 'honest' && f.heat === 0));
 });
