@@ -276,6 +276,19 @@ table.history { margin: 10px 0; }
   .hud-meters .meter-label span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
 
+/* collapsible scoreboard */
+.hud-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.hud-row .hud-meters { flex: 1; margin-top: 0; }
+.hud-toggle { flex: none; padding: 4px 10px; font-size: 1rem; line-height: 1; align-self: stretch; }
+.hud-mini { display: none; font-weight: 700; font-size: .8rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hud.collapsed .hud-top { display: none; }
+.hud.collapsed .hud-row { margin-top: 0; }
+.hud.collapsed .hud-mini { display: inline; }
+.hud.collapsed .m-word { display: none; }
+.hud.collapsed .hud-meters { gap: 8px; }
+.hud.collapsed .meter-label { font-size: .75rem; }
+.in-game .hud.collapsed { padding: 6px 10px; }
+
 /* the hidden attribute must win over the display rules above */
 .ticker[hidden], .raid-banner[hidden] { display: none; }
 

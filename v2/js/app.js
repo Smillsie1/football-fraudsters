@@ -62,11 +62,12 @@ function save(key, value) {
 }
 
 // A meter whose fill and number update in place each frame.
-function liveMeter(label, tone) {
+function liveMeter(icon, label, tone) {
   const fill = h('span', { class: `meter-fill ${tone}` });
   const num = h('strong', {}, '0');
   const track = h('div', { class: 'meter-track', role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': label }, fill);
-  const el = h('div', { class: 'meter' }, h('div', { class: 'meter-label' }, h('span', {}, label), num), track);
+  const el = h('div', { class: 'meter' },
+    h('div', { class: 'meter-label' }, h('span', {}, icon, h('span', { class: 'm-word' }, ` ${label}`)), num), track);
   let last = -1;
   return {
     el,
@@ -130,9 +131,9 @@ function startRun(isDaily) {
 }
 
 function screenGame() {
-  const heat = liveMeter('\u{1F525} Heat', 'bad');
-  const caseFile = liveMeter('\u{1F4C1} Case File', 'case');
-  const fans = liveMeter('❤️ Fans', 'good');
+  const heat = liveMeter('\u{1F525}', 'Heat', 'bad');
+  const caseFile = liveMeter('\u{1F4C1}', 'Case File', 'case');
+  const fans = liveMeter('\u2764\uFE0F', 'Fans', 'good');
   const t = (cls = '') => h('span', { class: cls }, '');
   ui = {
     heat, caseFile, fans,
@@ -141,6 +142,8 @@ function screenGame() {
     raidBanner: h('div', { class: 'raid-banner', role: 'alert', hidden: true }),
     ticker: h('div', { class: 'ticker', 'aria-live': 'polite', hidden: true }),
     timers: [],
+    mini: h('span', { class: 'hud-mini' }),
+    hudBtn: h('button', { type: 'button', class: 'ghost hud-toggle', 'aria-controls': 'hud-details', onclick: () => setHudCollapsed(!hudCollapsed) }),
     lastRaidSeen: 0,
     topUpBtn: h('button', { type: 'button', class: 'ghost small-btn', onclick: onTopUp }),
     pauseBtn: h('button', { type: 'button', class: 'ghost small-btn', onclick: togglePause }),
@@ -157,8 +160,8 @@ function screenGame() {
     overlay: null,
   };
   render(
-    h('div', { class: 'hud card' },
-      h('div', { class: 'hud-top' },
+    ui.hud = h('div', { class: 'hud card' },
+      h('div', { class: 'hud-top', id: 'hud-details' },
         h('div', { class: 'hud-club' },
           h('strong', { class: 'club-name' }, run.club),
           h('span', { class: 'muted small' }, ui.season, ' · ', ui.week, ' · ', ui.division)),
@@ -169,7 +172,10 @@ function screenGame() {
           h('span', {}, 'Squad ', ui.strength),
           h('span', { title: 'Fair-value deals in a row multiply their value. Any inflated deal, off-book money or landed leak breaks it.' }, 'Streak ', ui.combo),
           h('span', {}, '⚖️ ', ui.charges))),
-      h('div', { class: 'hud-meters' }, heat.el, caseFile.el, fans.el)),
+      h('div', { class: 'hud-row' },
+        ui.mini,
+        h('div', { class: 'hud-meters' }, heat.el, caseFile.el, fans.el),
+        ui.hudBtn)),
     h('div', { class: 'play-layout' },
       h('div', {},
         ui.arena,
@@ -185,6 +191,7 @@ function screenGame() {
   );
   ui.arena.append(ui.raidBanner, ui.ticker);
   document.body.classList.add('in-game');
+  setHudCollapsed(hudCollapsed, false);
   setSpeed(speed);
   sync();
   // Measure once the buttons have their labels, and again after layout settles.
@@ -274,6 +281,7 @@ function sync() {
   ui.rank.textContent = `#${moneyRank(run, rev)}`;
   ui.strength.textContent = String(Math.round(strength(run)));
   ui.charges.textContent = `${run.charges}/${MAX_CHARGES}`;
+  ui.mini.textContent = `${ordinal(leaguePosition(run))} \u00B7 W${Math.min(run.week + 1, WEEKS)} \u00B7 S${run.seasonNo}`;
   ui.combo.textContent = run.combo > 1 ? `\u00D7${comboMult(run.combo).toFixed(2)}` : '\u2014';
   ui.combo.classList.toggle('streak-on', run.combo > 1);
   ui.arena.classList.toggle('raid', !!run.raid);
@@ -706,6 +714,21 @@ document.addEventListener('keydown', (e) => {
     setSpeed(Number(e.key));
   }
 });
+
+// The scoreboard folds down to one row of meters. Phones start folded;
+// whatever the player picks is remembered.
+let hudCollapsed = load('sg2-hud-collapsed', window.matchMedia('(max-width: 560px)').matches);
+function setHudCollapsed(on, remember = true) {
+  hudCollapsed = on;
+  if (remember) save('sg2-hud-collapsed', on);
+  if (!ui?.hud) return;
+  ui.hud.classList.toggle('collapsed', on);
+  ui.hudBtn.textContent = on ? '\u25BE' : '\u25B4';
+  ui.hudBtn.setAttribute('aria-expanded', String(!on));
+  ui.hudBtn.setAttribute('aria-label', on ? 'Show full scoreboard' : 'Fold the scoreboard');
+  ui.hudBtn.title = ui.hudBtn.getAttribute('aria-label');
+  if (remember) requestAnimationFrame(fitArena);
+}
 
 // On phones and narrow windows the pitch fills whatever height is left below
 // the scoreboard; on wide screens the stylesheet's height applies.
