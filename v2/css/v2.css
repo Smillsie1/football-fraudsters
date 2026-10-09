@@ -15,6 +15,8 @@
 
 .v2tag { background: var(--gold); color: #1d1600; border-radius: 6px; padding: 0 6px; font-size: .85rem; margin-left: 2px; }
 .top-actions { display: flex; gap: 8px; align-items: center; }
+.top-actions > * { white-space: nowrap; }
+.brand { white-space: nowrap; }
 #sound-btn { padding: 6px 12px; font-size: .9rem; }
 .toplink { color: #fff; text-decoration: none; padding: 6px 12px; border: 1px solid rgb(255 255 255 / .35); border-radius: 10px; font-size: .9rem; }
 
@@ -32,7 +34,6 @@
 .hud-meters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; }
 .hud-meters .meter + .meter { margin-top: 0; }
 .meter-fill.case { background: var(--case); }
-@media (max-width: 560px) { .hud-meters { grid-template-columns: 1fr; gap: 4px; } }
 
 /* layout */
 .play-layout { display: grid; grid-template-columns: 1fr 300px; gap: 16px; align-items: start; }
@@ -251,3 +252,36 @@ table.history { margin: 10px 0; }
   .float { animation: fade-out 1s linear forwards; }
 }
 @keyframes fade-out { to { opacity: 0; } }
+
+/* phones and narrow windows: give the pitch the screen */
+@media (max-width: 860px) {
+  .in-game main { padding: 8px 8px 24px; }
+  .in-game .footer { display: none; }
+  .in-game .topbar { position: static; padding: 6px 10px; }
+  .in-game .hud { position: static; padding: 8px 10px; margin-bottom: 8px; }
+  .hud-top { gap: 2px 12px; }
+  .hud-club .club-name { font-size: 1rem; }
+  .hud-stats { font-size: .78rem; gap: 2px 10px; }
+  .hud-meters { gap: 8px; margin-top: 6px; }
+  .hud .meter-label { font-size: .72rem; }
+  .hud .meter-track { height: 8px; }
+  .in-game .controls { margin: 8px 0 12px; gap: 6px; }
+  .in-game .small-btn { padding: 6px 10px; }
+}
+@media (max-width: 420px) {
+  .deal { width: 66px; height: 66px; }
+  .deal.infl-4 { width: 76px; height: 76px; }
+  .door, .star { width: 72px; height: 72px; }
+  .b-emoji { font-size: 1.3rem; }
+  .hud-meters .meter-label span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+
+/* the hidden attribute must win over the display rules above */
+.ticker[hidden], .raid-banner[hidden] { display: none; }
+
+@media (max-width: 560px) {
+  .top-actions .lbl { display: none; }
+  .top-actions { gap: 6px; }
+  #sound-btn, .toplink { padding: 6px 10px; }
+  .brand { font-size: 1rem; }
+}

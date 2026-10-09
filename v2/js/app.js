@@ -43,6 +43,7 @@ function h(tag, props = {}, ...children) {
 }
 
 function render(...nodes) {
+  document.body.classList.remove('in-game');
   app.replaceChildren(...nodes);
   app.focus({ preventScroll: true });
   window.scrollTo({ top: 0 });
@@ -148,7 +149,7 @@ function screenGame() {
       h('div', { class: 'journalist', 'aria-hidden': 'true' }, '\u{1F575}️', h('span', {}, 'Press'))),
     news: h('ol', { class: 'news', 'aria-live': 'polite' }),
     signed: h('ul', { class: 'signed' }),
-    signedKey: '',
+    signedKey: null,
     table: h('tbody'),
     els: new Map(),
     newsKey: '',
@@ -172,8 +173,8 @@ function screenGame() {
     h('div', { class: 'play-layout' },
       h('div', {},
         ui.arena,
-        h('div', { class: 'controls' },
-          ui.pauseBtn, ...ui.speedBtns,
+        ui.controls = h('div', { class: 'controls' },
+          ui.pauseBtn, ...ui.speedBtns, fullscreenBtn(),
           h('span', { class: 'spacer' }),
           ui.topUpBtn)),
       h('aside', {},
@@ -183,8 +184,12 @@ function screenGame() {
           h('table', { class: 'mini' }, h('caption', {}, 'League table'), ui.table)))),
   );
   ui.arena.append(ui.raidBanner, ui.ticker);
+  document.body.classList.add('in-game');
   setSpeed(speed);
   sync();
+  // Measure once the buttons have their labels, and again after layout settles.
+  fitArena();
+  requestAnimationFrame(fitArena);
   sound.duck(false);
   sound.startMusic();
   sound.whistle();
@@ -671,7 +676,8 @@ const SOUND_MODES = [
 const soundBtn = document.getElementById('sound-btn');
 function showSoundMode() {
   const m = SOUND_MODES.find((x) => x[0] === sound.getMode()) || SOUND_MODES[0];
-  soundBtn.textContent = m[1];
+  const [icon, ...words] = m[1].split(' ');
+  soundBtn.replaceChildren(h('span', { 'aria-hidden': 'true' }, icon), h('span', { class: 'lbl' }, ` ${words.join(' ')}`));
   soundBtn.setAttribute('aria-label', `Sound: ${m[1]}. Click to change`);
 }
 soundBtn.addEventListener('click', () => {
@@ -700,6 +706,34 @@ document.addEventListener('keydown', (e) => {
     setSpeed(Number(e.key));
   }
 });
+
+// On phones and narrow windows the pitch fills whatever height is left below
+// the scoreboard; on wide screens the stylesheet's height applies.
+const narrow = window.matchMedia('(max-width: 860px)');
+function fitArena() {
+  if (!ui?.arena?.isConnected) return;
+  if (!narrow.matches) { ui.arena.style.removeProperty('height'); return; }
+  const top = ui.arena.getBoundingClientRect().top + window.scrollY;
+  const controls = ui.controls ? ui.controls.offsetHeight + 16 : 60;
+  ui.arena.style.height = `${Math.max(280, window.innerHeight - top - controls)}px`;
+}
+window.addEventListener('resize', fitArena);
+narrow.addEventListener('change', fitArena);
+
+// Full screen where the browser allows it (not iPhone Safari, which only
+// allows it for video).
+function fullscreenBtn() {
+  if (!document.fullscreenEnabled) return null;
+  const btn = h('button', { type: 'button', class: 'ghost small-btn fs-btn' });
+  const label = () => { btn.textContent = document.fullscreenElement ? '\u2715 Exit full screen' : '\u26F6 Full screen'; };
+  btn.addEventListener('click', () => {
+    const p = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+    p?.catch(() => { /* refused: carry on windowed */ });
+  });
+  document.addEventListener('fullscreenchange', () => { label(); setTimeout(fitArena, 50); });
+  label();
+  return btn;
+}
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && run?.phase === 'play' && rafId) { paused = true; sync(); }
