@@ -299,3 +299,29 @@ export const FUNNELS = [
   { id: 'agent', name: 'Agent "consultancy"', desc: 'Paid to the agent\'s Jersey company. Cooler, but agents talk.', heat: 4, uses: 'agent',
     risk: { p: 0.3, case: 12, news: 'The agent\'s ex-partner sells the "consultancy" story to the papers.' } },
 ];
+
+// --- Dawn raids: at very high Heat, investigators flood the pitch with leaks ---
+export const RAID = {
+  heat: 85,        // heat that triggers a raid (once per season at most)
+  seconds: 10,     // how long documents keep pouring out
+  every: 0.4,      // seconds between raid leaks
+  speed: 1.7,      // raid leaks move this much faster
+  caseMult: 0.6,   // each missed raid leak is worth this share of a normal leak
+  allowMiss: 1,    // miss this many or fewer and the raid finds nothing
+  cleanCool: 30,   // heat lost after a clean raid
+  dirtyCool: 10,   // heat lost after a messy one
+};
+
+// --- Laundering combos: chain fair-value deals for a growing multiplier --------
+// Any non-fair deal, off-book money or a leak reaching the press breaks it.
+export const COMBO = { step: 0.08, max: 10 }; // x1.08 per deal, up to x1.8
+
+// --- Big matches: a few featured fixtures a season, with a live score ticker ---
+export const BIG_MATCH = {
+  perSeason: 3,
+  legendGoals: 0.15, // extra expected goals per signed legend
+  fansMult: 2,       // fan swing compared with a normal match
+};
+export const BIG_MATCH_NAMES = ['Derby day', 'Top-of-the-table clash', 'Cup tie under the lights', 'Grudge match', 'Six-pointer'];
+export const YOUTH_SCORERS = ['your number 9', 'a teenage substitute', 'the captain', 'a centre-back at a corner', 'a deflected long shot'];
+export const OPP_SCORERS = ['Bloggs', 'Smith-Smythe', 'Okonkwo-Hughes', 'Van der Berg', 'Fernandes', 'MacTavish', 'Lindqvist', 'Brannigan'];

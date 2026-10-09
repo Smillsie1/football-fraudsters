@@ -10,6 +10,7 @@ import {
   SEASONS, SEASON_SECONDS, WEEKS, SQUAD_SHARE, DEAL_TERM, MAX_CHARGES, DIVISIONS, START,
   METHODS, INFLATION, MONEY_LEAGUE, RIVAL_GROWTH, TOWNS, SUFFIXES, CARDS,
   CONTACTS, TELLS, SMALL_TALK, STING, NEWSPAPER, LEGENDS, FUNNELS,
+  RAID, COMBO, BIG_MATCH, BIG_MATCH_NAMES, YOUTH_SCORERS, OPP_SCORERS,
 } from './data.js';
 
 export const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
@@ -107,6 +108,15 @@ export function newRun({ clubName = 'Sportswash FC', seed = 1 } = {}, rng = Math
     transferTimer: 14,
     transfer: null,      // the star transfer being negotiated
     signed: [],          // legend ids signed this run
+    combo: 0,            // fair-value deals in a row
+    bestCombo: 0,
+    raid: null,          // a dawn raid in progress
+    raids: 0,
+    raidedThisSeason: false,
+    lastRaid: null,
+    bigWeeks: pickBigWeeks(rng),
+    bigMatches: 0,
+    lastBigMatch: null,
     over: null,          // { reason: 'complete' | 'expelled' | 'revolt' }
   };
   return s;
@@ -160,8 +170,9 @@ function spawnDeal(s, rng) {
   });
 }
 
-function spawnLeak(s, rng) {
-  s.bubbles.push({ id: s.nextId++, type: 'leak', x: 0, y: 0.1 + 0.8 * rng(), speed: (1 + s.heat / 100) / 7 });
+function spawnLeak(s, rng, raid = false) {
+  const speed = ((1 + s.heat / 100) / 7) * (raid ? RAID.speed : 1);
+  s.bubbles.push({ id: s.nextId++, type: 'leak', x: 0, y: 0.1 + 0.8 * rng(), speed, raid });
 }
 
 function playWeek(s, rng) {
@@ -172,14 +183,73 @@ function playWeek(s, rng) {
     const r = rng();
     return r < pw ? 3 : r < pw + 0.26 ? 1 : 0;
   };
-  for (const t of s.table) t.pts += result(t.strength);
-  const pts = result(strength(s));
+  const big = s.bigWeeks.includes(s.week) ? bigMatch(s, rng) : null;
+  for (const t of s.table) if (t !== big?.opp) t.pts += result(t.strength);
+  const pts = big ? big.pts : result(strength(s));
   s.pts += pts;
-  s.fans = clamp(s.fans + (pts === 3 ? 1.2 : pts === 0 ? -1.4 : 0), 0, 100);
+  const swing = big ? BIG_MATCH.fansMult : 1;
+  s.fans = clamp(s.fans + (pts === 3 ? 1.2 : pts === 0 ? -1.4 : 0) * swing, 0, 100);
   s.week++;
   if (s.expose) s.expose.weeks--;
   return pts;
 }
+
+// --- big matches ------------------------------------------------------------------
+function pickBigWeeks(rng) {
+  const weeks = new Set();
+  while (weeks.size < BIG_MATCH.perSeason) weeks.add(5 + Math.floor(rng() * 31));
+  return [...weeks];
+}
+
+function poisson(lambda, rng) {
+  const limit = Math.exp(-lambda);
+  let k = 0;
+  let p = rng();
+  while (p > limit) { k++; p *= rng(); }
+  return k;
+}
+
+// A featured fixture against one of the top six, played out goal by goal.
+// Signed legends make you likelier to score, and they get the goals.
+function bigMatch(s, rng) {
+  const rivals = [...s.table].sort((a, b) => b.pts - a.pts || b.strength - a.strength).slice(0, 6);
+  const opp = pickFrom(rivals, rng);
+  const diff = (strength(s) - opp.strength) / 10;
+  const you = poisson(clamp(1.35 + diff + BIG_MATCH.legendGoals * s.signed.length, 0.3, 3.5), rng);
+  const them = poisson(clamp(1.35 - diff, 0.3, 3.5), rng);
+  const events = [];
+  for (let i = 0; i < you; i++) {
+    const legend = s.signed.length && rng() < 0.75 ? legendById(pickFrom(s.signed, rng)).name : pickFrom(YOUTH_SCORERS, rng);
+    events.push({ min: 1 + Math.floor(rng() * 90), side: 'you', scorer: legend });
+  }
+  for (let i = 0; i < them; i++) events.push({ min: 1 + Math.floor(rng() * 90), side: 'them', scorer: pickFrom(OPP_SCORERS, rng) });
+  events.sort((a, b) => a.min - b.min);
+  const pts = you > them ? 3 : you === them ? 1 : 0;
+  opp.pts += you < them ? 3 : you === them ? 1 : 0;
+  s.bigMatches++;
+  s.lastBigMatch = { id: s.bigMatches, title: pickFrom(BIG_MATCH_NAMES, rng), opp: opp.name, you, them, events };
+  const ours = events.filter((e) => e.side === 'you').map((e) => `${e.scorer} ${e.min}'`).join(', ');
+  addNews(s, `FT: ${s.club} ${you}-${them} ${opp.name}${ours ? ` (${ours})` : ''}`, pts === 0 ? 'bad' : '');
+  return { opp, pts };
+}
+
+// --- dawn raids -------------------------------------------------------------------
+function startRaid(s) {
+  s.raid = { left: RAID.seconds, spawnTimer: 0, spawned: 0, missed: 0 };
+  s.raidedThisSeason = true;
+  s.raids++;
+  addNews(s, 'DAWN RAID! Investigators are at the training ground.', 'bad');
+}
+
+function endRaid(s) {
+  const clean = s.raid.missed <= RAID.allowMiss;
+  s.heat = clamp(s.heat - (clean ? RAID.cleanCool : RAID.dirtyCool), 0, 100);
+  s.lastRaid = { id: s.raids, missed: s.raid.missed, spawned: s.raid.spawned, clean };
+  addNews(s, clean ? 'The raid found nothing. Derek is furious.' : `Investigators leave with ${s.raid.missed} boxes of documents.`, clean ? '' : 'bad');
+  s.raid = null;
+}
+
+export const comboMult = (n) => 1 + COMBO.step * clamp(n - 1, 0, COMBO.max);
 
 export function tick(s, dt, rng = Math.random) {
   if (s.phase !== 'play') return;
@@ -199,13 +269,22 @@ export function tick(s, dt, rng = Math.random) {
   s.caseFile = clamp(s.caseFile + dt * caseRate, 0, 100);
 
   s.dealTimer -= dt;
-  if (s.dealTimer <= 0) { spawnDeal(s, rng); s.dealTimer = 2 + 2.5 * rng(); }
+  if (s.dealTimer <= 0 && !s.raid) { spawnDeal(s, rng); s.dealTimer = 2 + 2.5 * rng(); }
 
-  s.leakTimer -= dt * (0.03 + 0.25 * s.heat / 100);
-  if (s.leakTimer <= 0) { spawnLeak(s, rng); s.leakTimer = 0.5 + rng(); }
+  if (s.raid) {
+    s.raid.left -= dt;
+    s.raid.spawnTimer -= dt;
+    if (s.raid.left > 0 && s.raid.spawnTimer <= 0) { spawnLeak(s, rng, true); s.raid.spawned++; s.raid.spawnTimer = RAID.every; }
+    // The raid ends once the clock runs out and its last document has landed or been shredded.
+    if (s.raid.left <= 0 && !s.bubbles.some((b) => b.raid)) endRaid(s);
+  } else {
+    s.leakTimer -= dt * (0.03 + 0.25 * s.heat / 100);
+    if (s.leakTimer <= 0) { spawnLeak(s, rng); s.leakTimer = 0.5 + rng(); }
+    if (s.heat >= RAID.heat && !s.raidedThisSeason) startRaid(s);
+  }
 
   s.transferTimer -= dt;
-  if (s.transferTimer <= 0) {
+  if (s.transferTimer <= 0 && !s.raid) {
     spawnTransfer(s, rng);
     s.transferTimer = TRANSFER_GAP[0] + (TRANSFER_GAP[1] - TRANSFER_GAP[0]) * rng();
   }
@@ -220,7 +299,9 @@ export function tick(s, dt, rng = Math.random) {
     else b.life -= dt;
   }
   for (const b of s.bubbles.filter((x) => x.type === 'leak' && x.x >= 1)) {
-    s.caseFile = clamp(s.caseFile + LEAK_CASE * div.scrutiny, 0, 100);
+    s.caseFile = clamp(s.caseFile + LEAK_CASE * div.scrutiny * (b.raid ? RAID.caseMult : 1), 0, 100);
+    if (b.raid && s.raid) s.raid.missed++;
+    s.combo = 0;
     s.heat = clamp(s.heat + 3, 0, 100);
     s.leaksLanded++;
     addNews(s, 'A document reached the press.', 'bad');
@@ -232,6 +313,7 @@ export function tick(s, dt, rng = Math.random) {
   if (s.expose && s.expose.weeks <= 0) return openExpose(s);
   if (s.week >= WEEKS) return endSeason(s, rng);
 
+  if (s.raid) return; // no interruptions mid-raid
   s.cardTimer -= dt;
   if (s.cardTimer <= 0) drawCard(s, rng);
 }
@@ -244,11 +326,16 @@ export function collect(s, id, rng = Math.random) {
   const heat = m.heat * b.infl ** 1.4 * methodHeatMult(s, m.id) * division(s).scrutiny;
   s.heat = clamp(s.heat + heat, 0, 100);
   s.uses[m.id] = (s.uses[m.id] || 0) + 1;
-  if (m.kind === 'recurring') s.deals.push({ methodId: m.id, value: b.value, left: DEAL_TERM });
-  else if (m.kind === 'oneoff') s.oneoff += b.value;
-  else { s.offbook += b.value; spawnLeak(s, rng); }
+  // Clean streak: fair-value, on-the-books deals in a row grow a multiplier.
+  let mult = 1;
+  if (b.infl === 1 && m.kind !== 'offbook') { s.combo++; mult = comboMult(s.combo); } else s.combo = 0;
+  s.bestCombo = Math.max(s.bestCombo, s.combo);
+  const value = b.value * mult;
+  if (m.kind === 'recurring') s.deals.push({ methodId: m.id, value, left: DEAL_TERM });
+  else if (m.kind === 'oneoff') s.oneoff += value;
+  else { s.offbook += value; spawnLeak(s, rng); }
   s.bubbles = s.bubbles.filter((x) => x !== b);
-  return { method: m, value: b.value, heat };
+  return { method: m, value, heat, combo: s.combo, mult };
 }
 
 export function shred(s, id) {
@@ -541,6 +628,9 @@ function endSeason(s, rng) {
   s.pts = ffpBreach ? -next.ptsPenalty : 0;
   if (ffpBreach) s.caseFile = clamp(s.caseFile + 15, 0, 100);
   s.table = makeTable(next, rng, s.club);
+  s.bigWeeks = pickBigWeeks(rng);
+  s.raid = null;
+  s.raidedThisSeason = false;
   s.doorWeek = 6 + Math.floor(rng() * 24);
   s.doorShown = false;
   s.bubbles = [];

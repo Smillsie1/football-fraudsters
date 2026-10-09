@@ -150,6 +150,25 @@ table.mini tr.down td:first-child { box-shadow: inset 3px 0 var(--bad); }
 .swipe-hint { margin: 10px 0 0; }
 @keyframes card-in { from { transform: translateY(30px) scale(.95); opacity: 0; } }
 
+/* dawn raids, streaks and big matches */
+.arena.raid { animation: raid-flash .5s steps(2, jump-none) infinite; }
+@keyframes raid-flash { from { box-shadow: inset 0 0 0 5px var(--bad), var(--shadow); } to { box-shadow: inset 0 0 0 5px #3b6bd6, var(--shadow); } }
+.raid-banner {
+  position: absolute; left: 50%; top: 10px; transform: translateX(-50%); z-index: 3;
+  background: var(--bad); color: #fff; font-weight: 800; padding: 6px 14px; border-radius: 999px;
+  white-space: nowrap; pointer-events: none;
+}
+.ticker {
+  position: absolute; left: 10px; bottom: 10px; z-index: 3; max-width: calc(87% - 20px);
+  display: flex; flex-direction: column; gap: 2px;
+  background: rgb(0 0 0 / .72); color: #fff; padding: 6px 12px; border-radius: 10px;
+  font-size: .9rem; font-variant-numeric: tabular-nums; pointer-events: none;
+}
+.ticker strong { color: var(--gold); font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; }
+.ticker.done { background: rgb(0 0 0 / .85); }
+.streak-on { color: var(--gold); }
+.float.streak { background: var(--gold); color: #1d1600; }
+
 /* the transfer market */
 .star {
   --life: 1;
@@ -228,6 +247,7 @@ table.history { margin: 10px 0; }
 
 @media (prefers-reduced-motion: reduce) {
   .deal, .deal.infl-4, .door, .star, .room, .swipe-card { animation: none; }
+  .arena.raid { animation: none; box-shadow: inset 0 0 0 5px var(--bad), var(--shadow); }
   .float { animation: fade-out 1s linear forwards; }
 }
 @keyframes fade-out { to { opacity: 0; } }

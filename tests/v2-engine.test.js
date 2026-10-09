@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SEASONS, WEEKS, SEASON_SECONDS, MAX_CHARGES, DEAL_TERM, CARDS, METHODS, CONTACTS, STING, LEGENDS, FUNNELS } from '../v2/js/data.js';
+import { SEASONS, WEEKS, SEASON_SECONDS, MAX_CHARGES, DEAL_TERM, CARDS, METHODS, CONTACTS, STING, LEGENDS, FUNNELS, RAID, COMBO, BIG_MATCH } from '../v2/js/data.js';
 import {
   newRun, tick, collect, shred, topUp, choose, nextSeason, mulberry32, dailySeed,
   bookedRevenue, strength, strengthFromSpend, methodHeatMult, moneyRank, leagueTable,
   ffpHeadroom, topUpAmount, stars, shareText, division,
   enterMeeting, meetingSay, leaveMeeting, wiredChance, contactById, exposePenalty,
-  openTransfer, signTransfer, passTransfer, funnelHeat, squadSpend,
+  openTransfer, signTransfer, passTransfer, funnelHeat, squadSpend, comboMult,
 } from '../v2/js/engine.js';
 
 const fresh = (seed = 42) => {
@@ -473,4 +473,105 @@ test('every legend and funnel is well formed', () => {
   assert.equal(ids.size, LEGENDS.length);
   for (const l of LEGENDS) assert.ok(l.rating > 70 && l.rating <= 99, l.id);
   assert.ok(FUNNELS.some((f) => f.id === 'honest' && f.heat === 0));
+});
+
+// --- combos ---------------------------------------------------------------------------
+test('fair-value deals in a row build a growing multiplier', () => {
+  const { s, rng } = fresh();
+  const a = collect(s, addDeal(s, 'airline', 1, 10).id, rng);
+  const b = collect(s, addDeal(s, 'airline', 1, 10).id, rng);
+  const c = collect(s, addDeal(s, 'partners', 1, 10).id, rng);
+  assert.equal(a.mult, 1);
+  assert.ok(b.value > a.value && c.value > b.value);
+  assert.equal(s.combo, 3);
+  assert.equal(comboMult(1000), 1 + COMBO.step * COMBO.max);
+});
+
+test('an inflated deal, off-book money or a landed leak breaks the streak', () => {
+  const { s, rng } = fresh();
+  collect(s, addDeal(s, 'airline', 1).id, rng);
+  collect(s, addDeal(s, 'airline', 2).id, rng);
+  assert.equal(s.combo, 0);
+  collect(s, addDeal(s, 'airline', 1).id, rng);
+  collect(s, addDeal(s, 'image', 1).id, rng);
+  assert.equal(s.combo, 0);
+  collect(s, addDeal(s, 'airline', 1).id, rng);
+  s.bubbles = [];
+  addLeak(s, 0.999);
+  s.cardTimer = 99;
+  tick(s, 0.05, rng);
+  assert.equal(s.combo, 0);
+  assert.ok(s.bestCombo >= 1);
+});
+
+// --- dawn raids -------------------------------------------------------------------------
+const raidRun = (shredAll, seed = 9) => {
+  const { s, rng } = fresh(seed);
+  s.heat = RAID.heat + 5;
+  s.cardTimer = 99;
+  tick(s, 0.05, rng);
+  assert.ok(s.raid, 'raid should start at high heat');
+  for (let t = 0; t < 30 && s.raid; t += 0.05) {
+    s.cardTimer = 99;
+    s.caseFile = Math.min(s.caseFile, 50); // keep hearings out of the way
+    if (shredAll) for (const b of [...s.bubbles]) if (b.type === 'leak') shred(s, b.id);
+    tick(s, 0.05, rng);
+  }
+  return s;
+};
+
+test('a dawn raid floods the pitch with fast leaks and stops new deals', () => {
+  const { s, rng } = fresh(9);
+  s.heat = 95; s.cardTimer = 99;
+  tick(s, 0.05, rng);
+  s.bubbles = s.bubbles.filter((b) => b.type !== 'deal');
+  for (let i = 0; i < 40; i++) { s.cardTimer = 99; tick(s, 0.05, rng); }
+  const leaks = s.bubbles.filter((b) => b.type === 'leak' && b.raid);
+  assert.ok(leaks.length >= 3);
+  assert.ok(!s.bubbles.some((b) => b.type === 'deal'));
+});
+
+test('shredding everything makes the raid find nothing and cools you down', () => {
+  const s = raidRun(true);
+  assert.equal(s.raid, null);
+  assert.ok(s.lastRaid.clean);
+  assert.ok(s.lastRaid.spawned >= RAID.seconds / RAID.every - 2);
+});
+
+test('a messy raid adds to the case file', () => {
+  const s = raidRun(false);
+  assert.equal(s.lastRaid.clean, false);
+  assert.ok(s.lastRaid.missed > RAID.allowMiss);
+});
+
+test('only one raid per season', () => {
+  const s = raidRun(true);
+  s.heat = 99;
+  s.cardTimer = 99;
+  tick(s, 0.05, mulberry32(1));
+  assert.equal(s.raid, null);
+  assert.equal(s.raids, 1);
+});
+
+// --- big matches ----------------------------------------------------------------------
+test('each season has big matches with a goal-by-goal result', () => {
+  const { s, rng } = fresh();
+  assert.equal(s.bigWeeks.length, BIG_MATCH.perSeason);
+  runFor(s, SEASON_SECONDS + 1, rng);
+  assert.equal(s.bigMatches, BIG_MATCH.perSeason);
+  const m = s.lastBigMatch;
+  assert.equal(m.events.filter((e) => e.side === 'you').length, m.you);
+  assert.equal(m.events.filter((e) => e.side === 'them').length, m.them);
+  for (let i = 1; i < m.events.length; i++) assert.ok(m.events[i].min >= m.events[i - 1].min);
+});
+
+test('signed legends score in big matches', () => {
+  let legendGoals = 0;
+  for (const seed of [1, 2, 3, 4, 5, 6]) {
+    const { s, rng } = fresh(seed);
+    s.signed = ['pele', 'maradona', 'zidane'];
+    runFor(s, SEASON_SECONDS + 1, rng);
+    legendGoals += s.news.filter((n) => /Pel|Marodona|Zidame/.test(n.text)).length;
+  }
+  assert.ok(legendGoals > 0);
 });

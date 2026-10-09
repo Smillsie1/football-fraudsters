@@ -140,6 +140,30 @@ export function gavel() {
   }
 }
 
+// A two-tone police siren for the dawn raid.
+export function siren(seconds = 3) {
+  if (!ready()) return;
+  const t = now();
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'triangle';
+  for (let i = 0; i < seconds * 2; i++) o.frequency.setValueAtTime(i % 2 ? 960 : 720, t + i * 0.5);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.09, t + 0.05);
+  g.gain.setValueAtTime(0.09, t + seconds - 0.2);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + seconds);
+  o.connect(g).connect(sfxBus);
+  o.start(t);
+  o.stop(t + seconds + 0.05);
+}
+
+// A rising blip that climbs with the streak.
+export function streak(n) {
+  if (!ready()) return;
+  const f = 660 * 2 ** (Math.min(n, 12) / 12);
+  tone(f, now(), 0.09, { type: 'square', gain: 0.07 });
+}
+
 export function whistle(long = false) {
   if (!ready()) return;
   const t = now();

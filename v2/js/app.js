@@ -5,7 +5,7 @@ import {
   division, bookedRevenue, strength, moneyLeague, moneyRank, leagueTable, leaguePosition,
   ffpHeadroom, topUpAmount, methodById, stars, bestRank, endingTitle, shareText, fightOdds,
   enterMeeting, meetingSay, leaveMeeting, contactById,
-  openTransfer, signTransfer, passTransfer, funnelHeat, legendById,
+  openTransfer, signTransfer, passTransfer, funnelHeat, legendById, comboMult,
 } from './engine.js';
 import * as sound from './audio.js';
 
@@ -22,6 +22,8 @@ let rafId = 0;
 let lastT = 0;
 let ui = null; // live references into the game screen
 let leaksHeard = 0;
+let raidsHeard = 0;
+let matchesSeen = 0;
 
 // --- tiny DOM helper -------------------------------------------------------
 function h(tag, props = {}, ...children) {
@@ -118,6 +120,8 @@ function startRun(isDaily) {
   rng = mulberry32(seed);
   run = newRun({ clubName, seed }, rng);
   leaksHeard = 0;
+  raidsHeard = 0;
+  matchesSeen = 0;
   sound.unlock();
   speed = 1;
   paused = false;
@@ -132,7 +136,11 @@ function screenGame() {
   ui = {
     heat, caseFile, fans,
     season: t(), week: t(), division: t(), position: t(), points: t(),
-    revenue: t('strong'), rank: t('strong'), strength: t('strong'), charges: t('strong'),
+    revenue: t('strong'), rank: t('strong'), strength: t('strong'), charges: t('strong'), combo: t('strong'),
+    raidBanner: h('div', { class: 'raid-banner', role: 'alert', hidden: true }),
+    ticker: h('div', { class: 'ticker', 'aria-live': 'polite', hidden: true }),
+    timers: [],
+    lastRaidSeen: 0,
     topUpBtn: h('button', { type: 'button', class: 'ghost small-btn', onclick: onTopUp }),
     pauseBtn: h('button', { type: 'button', class: 'ghost small-btn', onclick: togglePause }),
     speedBtns: [1, 2, 3].map((n) => h('button', { type: 'button', class: 'ghost small-btn', 'aria-pressed': 'false', onclick: () => setSpeed(n) }, `${n}×`)),
@@ -158,6 +166,7 @@ function screenGame() {
           h('span', {}, 'Revenue ', ui.revenue),
           h('span', {}, 'Money League ', ui.rank),
           h('span', {}, 'Squad ', ui.strength),
+          h('span', { title: 'Fair-value deals in a row multiply their value. Any inflated deal, off-book money or landed leak breaks it.' }, 'Streak ', ui.combo),
           h('span', {}, '⚖️ ', ui.charges))),
       h('div', { class: 'hud-meters' }, heat.el, caseFile.el, fans.el)),
     h('div', { class: 'play-layout' },
@@ -173,6 +182,7 @@ function screenGame() {
         h('div', { class: 'card' },
           h('table', { class: 'mini' }, h('caption', {}, 'League table'), ui.table)))),
   );
+  ui.arena.append(ui.raidBanner, ui.ticker);
   setSpeed(speed);
   sync();
   sound.duck(false);
@@ -186,7 +196,34 @@ function startLoop() {
   lastT = performance.now();
   rafId = requestAnimationFrame(frame);
 }
+// A big match plays out over a few seconds as a score ticker over the pitch.
+function playTicker(m) {
+  const box = ui.ticker;
+  const at = (ms, fn) => ui.timers.push(setTimeout(fn, ms));
+  let you = 0;
+  let them = 0;
+  const score = () => `${run.club} ${you}-${them} ${m.opp}`;
+  box.hidden = false;
+  box.classList.remove('done');
+  box.replaceChildren(h('strong', {}, `\u26BD ${m.title}`), h('span', {}, `${score()} \u00B7 Kick-off`));
+  sound.whistle();
+  const span = 4200;
+  for (const e of m.events) {
+    at(400 + (e.min / 90) * span, () => {
+      if (e.side === 'you') { you++; sound.cheer(); } else { them++; sound.leak(); }
+      box.replaceChildren(h('strong', {}, `\u26BD ${m.title}`), h('span', {}, `${score()} \u00B7 ${e.scorer} ${e.min}'`));
+    });
+  }
+  at(span + 700, () => {
+    box.classList.add('done');
+    box.replaceChildren(h('strong', {}, 'Full time'), h('span', {}, `${run.club} ${m.you}-${m.them} ${m.opp}`));
+    sound.whistle(true);
+  });
+  at(span + 3200, () => { box.hidden = true; });
+}
+
 function stopLoop() {
+  if (ui?.timers) { ui.timers.forEach(clearTimeout); ui.timers = []; }
   if (rafId) cancelAnimationFrame(rafId);
   rafId = 0;
   sound.stopMusic();
@@ -202,6 +239,13 @@ function frame(now) {
   sound.setHeat(run.heat);
   sound.duck(paused || run.phase !== 'play');
   if (run.leaksLanded > leaksHeard) { leaksHeard = run.leaksLanded; sound.leak(); }
+  if (run.raids > raidsHeard) { raidsHeard = run.raids; sound.siren(3); }
+  if (run.lastRaid && run.lastRaid.id > ui.lastRaidSeen) {
+    ui.lastRaidSeen = run.lastRaid.id;
+    if (run.lastRaid.clean) { sound.fanfare(); floatText(0.5, 0.5, 'Raid over: they found nothing!', 'streak'); }
+    else floatText(0.5, 0.5, `Raid over: ${run.lastRaid.missed} documents seized`, 'hot');
+  }
+  if (run.bigMatches > matchesSeen) { matchesSeen = run.bigMatches; playTicker(run.lastBigMatch); }
   if (run.phase === 'card') { showCard(); }
   if (run.phase === 'meeting') { showMeeting(); }
   if (run.phase === 'transfer') { showTransfer(); }
@@ -225,6 +269,11 @@ function sync() {
   ui.rank.textContent = `#${moneyRank(run, rev)}`;
   ui.strength.textContent = String(Math.round(strength(run)));
   ui.charges.textContent = `${run.charges}/${MAX_CHARGES}`;
+  ui.combo.textContent = run.combo > 1 ? `\u00D7${comboMult(run.combo).toFixed(2)}` : '\u2014';
+  ui.combo.classList.toggle('streak-on', run.combo > 1);
+  ui.arena.classList.toggle('raid', !!run.raid);
+  ui.raidBanner.hidden = !run.raid;
+  if (run.raid) ui.raidBanner.textContent = `\u{1F6A8} DAWN RAID! Shred everything! ${Math.max(0, Math.ceil(run.raid.left))}s`;
   const head = ffpHeadroom(run);
   ui.topUpBtn.textContent = `\u{1F4B7} Honest top-up +${formatMoney(topUpAmount(run))}`;
   ui.topUpBtn.title = `Owner equity: no heat, but over the ${formatMoney(div.lossLimit)} loss limit it's an FFP breach. Headroom: ${formatMoney(head)}`;
@@ -311,7 +360,9 @@ function onCollect(id) {
   const b = run.bubbles.find((x) => x.id === id);
   const res = collect(run, id, rng);
   if (res && b) {
-    floatText(b.x, b.y, `+${formatMoney(res.value)}  \u{1F525}+${Math.round(res.heat)}`, res.heat > 15 ? 'hot' : 'cash');
+    const streak = res.mult > 1 ? `  \u00D7${res.mult.toFixed(2)}` : '';
+    floatText(b.x, b.y, `+${formatMoney(res.value)}${streak}  \u{1F525}+${Math.round(res.heat)}`, res.heat > 15 ? 'hot' : res.mult > 1 ? 'streak' : 'cash');
+    if (res.combo > 1) sound.streak(res.combo);
     if (b.infl >= 4) sound.bigCash(); else sound.coin();
   }
   sync();
